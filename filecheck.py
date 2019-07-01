@@ -7,7 +7,12 @@ import argparse
 import os
 import stat
 import hashlib
+from fnmatch import fnmatch
+
 options = {}
+filecheckName = ".filecheck"
+filecheckTempName = ".filecheck.tmp"
+ignoreFiles = [filecheckName, filecheckTempName, ".git"]
 
 def md5(fileName):
     #print "executing md5 %s" % fileName
@@ -17,33 +22,44 @@ def md5(fileName):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
 
+def shouldIgnore(filename):
+    fileName = os.path.basename(filename)
+    for pattern in ignoreFiles:
+        if fnmatch(fileName, pattern):
+            return True
+    return False
+
 def walkTree(top, callback, recursive, followLink, beginDirCallback = False, endDirCallback = False):
     if callable(beginDirCallback):
         beginDirCallback(top)
     for f in os.listdir(top):
-        pathname = os.path.join(top, f)
-        mode = os.stat(pathname).st_mode
-        if stat.S_ISDIR(mode):
-            if recursive:
-                # It's a directory, recurse into it
-                walkTree(pathname, callback, recursive, followLink, beginDirCallback, endDirCallback)
-        elif stat.S_ISREG(mode):
-            # It's a file, call the callback function
-            callback(pathname)
-        elif stat.S_ISLNK(mode):
-            if followLink:
+        if not shouldIgnore(f):
+            pathname = os.path.join(top, f)
+            mode = os.stat(pathname).st_mode
+            if stat.S_ISDIR(mode):
+                if recursive:
+                    # It's a directory, recurse into it
+                    walkTree(pathname, callback, recursive, followLink, beginDirCallback, endDirCallback)
+            elif stat.S_ISREG(mode):
+                # It's a file, call the callback function
                 callback(pathname)
-        else:
-            # Unknown file type, print a message
-            print 'Skipping %s' % pathname
+            elif stat.S_ISLNK(mode):
+                if followLink:
+                    callback(pathname)
+            else:
+                # Unknown file type, print a message
+                print 'Skipping %s' % pathname
+        #else:
+        #    print 'Ignoring %s' % f
+
     if callable(endDirCallback):
         endDirCallback(top)
 
 def save(info):
     dirName = info["dirName"]
-    dbFile = os.path.join(dirName, ".filecheck.tmp")
+    dbFile = os.path.join(dirName, filecheckTempName)
     with open(dbFile, "a+t") as f:
-        f.write("%s:%d:%d:%d:%d:%s\r\n" % (info["md5"], info["size"], info["ctime"], info["mtime"], info["atime"], info["fileName"] ))
+        f.write("%s:%d:%d:%d:%d:%s\r\n" % (info["hash"], info["size"], info["ctime"], info["mtime"], info["atime"], info["fileName"] ))
 
 def checkBegin(dirName):
     generateBegin(dirName)
@@ -68,10 +84,10 @@ def compareData(current, saved):
             elif not options["ignore_ctime"] and savedValue["ctime"] != currentValue["ctime"]:
                 status = "ctime mismatch"
             else:
-                if not options["ignore_hash"] and currentValue["md5"] == "" and savedValue["md5"] != "":
-                    currentValue["md5"] = md5(os.path.join(currentValue["dirName"], currentValue["fileName"]))
+                if not options["ignore_hash"] and currentValue["hash"] == "" and savedValue["hash"] != "":
+                    currentValue["hash"] = md5(os.path.join(currentValue["dirName"], currentValue["fileName"]))
 
-                if not options["ignore_hash"] and savedValue["md5"] != currentValue["md5"]:
+                if not options["ignore_hash"] and savedValue["hash"] != currentValue["hash"]:
                     status = "MD5 mismatch"
                 else:
                     status = "same file"
@@ -106,7 +122,7 @@ def loadFilecheck(fileName):
                 data = {
                     'dirName': os.path.dirname(fileName),
                     'fileName': lineFields[5].rstrip("\n\r"),
-                    'md5': lineFields[0],
+                    'hash': lineFields[0],
                     'size': lineFields[1],
                     'ctime': lineFields[2],
                     'mtime': lineFields[3],
@@ -116,9 +132,9 @@ def loadFilecheck(fileName):
     return res
 
 def checkEnd(dirName):
-    currentFile = os.path.join(dirName, ".filecheck.tmp")
+    currentFile = os.path.join(dirName, filecheckTempName)
     currentData = loadFilecheck(currentFile)
-    savedData = loadFilecheck(os.path.join(dirName, ".filecheck"))
+    savedData = loadFilecheck(os.path.join(dirName, filecheckName))
 
     #print currentData
     #print savedData
@@ -128,7 +144,7 @@ def checkEnd(dirName):
 
 def generateBegin(dirName):
     #print "generateBegin %s" % dirName
-    dbFile = os.path.join(dirName, ".filecheck.tmp")
+    dbFile = os.path.join(dirName, filecheckTempName)
 
     if os.path.isfile(dbFile):
         os.unlink(dbFile)
@@ -138,33 +154,22 @@ def generateBegin(dirName):
 
 def generateEnd(dirName):
     #print "generateEnd %s" % dirName
-    dbFile = os.path.join(dirName, ".filecheck.tmp")
-    dbDefFile = os.path.join(dirName, ".filecheck")
+    dbFile = os.path.join(dirName, filecheckTempName)
+    dbDefFile = os.path.join(dirName, filecheckName)
     os.rename(dbFile, dbDefFile)
 
 def generateFileWithoutHash(filename):
-    fileName = os.path.basename(filename)
-    #print "XXX %s" % fileName
-    if fileName != ".filecheck" and fileName != ".filecheck.tmp":
-        info = {
-            'dirName': os.path.dirname(filename),
-            'fileName': fileName,
-            'md5': "",
-            'size': os.path.getsize(filename),
-            'ctime': os.path.getctime(filename),
-            'mtime': os.path.getmtime(filename),
-            'atime': os.path.getatime(filename)
-        }
-        save(info)
+    _generateFile(filename, False)
 
 def generateFile(filename):
-    fileName = os.path.basename(filename)
-    #print "XXX %s" % fileName
-    if fileName != ".filecheck" and fileName != ".filecheck.tmp":
+    _generateFile(filename, md5)
+
+def _generateFile(filename, hashFunc):
+    if not shouldIgnore(filename):
         info = {
             'dirName': os.path.dirname(filename),
-            'fileName': fileName,
-            'md5': md5(filename),
+            'fileName': os.path.basename(filename),
+            'hash': hashFunc(filename) if callable(hashFunc) else "",
             'size': os.path.getsize(filename),
             'ctime': os.path.getctime(filename),
             'mtime': os.path.getmtime(filename),
