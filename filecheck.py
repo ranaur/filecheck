@@ -9,9 +9,10 @@ import stat
 import hashlib
 options = {}
 
-def md5(fname):
+def md5(fileName):
+    #print "executing md5 %s" % fileName
     hash_md5 = hashlib.md5()
-    with open(fname, "rb") as f:
+    with open(fileName, "rb") as f:
         for chunk in iter(lambda: f.read(4096), b""):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
@@ -48,7 +49,7 @@ def checkBegin(dirName):
     generateBegin(dirName)
 
 def checkFile(fileName):
-    generateFile(fileName)
+    generateFileWithoutHash(fileName)
 
 def compareData(current, saved):
     showSameFile = options["show_same_files"]
@@ -58,18 +59,22 @@ def compareData(current, saved):
             status = "new item"
         else:
             savedValue = saved[key]
-            if savedValue["size"] != currentValue["size"]:
+            if not options["ignore_size"] and savedValue["size"] != currentValue["size"]:
                 status = "size mismatch"
-            elif savedValue["md5"] != currentValue["md5"]:
-                status = "MD5 mismatch"
-            elif savedValue["mtime"] != currentValue["mtime"]:
+            elif not options["ignore_mtime"] and savedValue["mtime"] != currentValue["mtime"]:
                 status = "mtime mismatch"
-            elif savedValue["atime"] != currentValue["atime"]:
+            elif not options["ignore_atime"] and savedValue["atime"] != currentValue["atime"]:
                 status = "atime mismatch"
-            elif savedValue["ctime"] != currentValue["ctime"]:
+            elif not options["ignore_ctime"] and savedValue["ctime"] != currentValue["ctime"]:
                 status = "ctime mismatch"
             else:
-                status = "same file"
+                if not options["ignore_hash"] and currentValue["md5"] == "" and savedValue["md5"] != "":
+                    currentValue["md5"] = md5(os.path.join(currentValue["dirName"], currentValue["fileName"]))
+
+                if not options["ignore_hash"] and savedValue["md5"] != currentValue["md5"]:
+                    status = "MD5 mismatch"
+                else:
+                    status = "same file"
             del saved[key]
         if showSameFile or status != "same file":
             print "%s: %s" % (status, key)
@@ -99,6 +104,7 @@ def loadFilecheck(fileName):
             else:
                 lineFields = line.split(":")
                 data = {
+                    'dirName': os.path.dirname(fileName),
                     'fileName': lineFields[5].rstrip("\n\r"),
                     'md5': lineFields[0],
                     'size': lineFields[1],
@@ -136,7 +142,22 @@ def generateEnd(dirName):
     dbDefFile = os.path.join(dirName, ".filecheck")
     os.rename(dbFile, dbDefFile)
 
-def generateFile(filename, ):
+def generateFileWithoutHash(filename):
+    fileName = os.path.basename(filename)
+    #print "XXX %s" % fileName
+    if fileName != ".filecheck" and fileName != ".filecheck.tmp":
+        info = {
+            'dirName': os.path.dirname(filename),
+            'fileName': fileName,
+            'md5': "",
+            'size': os.path.getsize(filename),
+            'ctime': os.path.getctime(filename),
+            'mtime': os.path.getmtime(filename),
+            'atime': os.path.getatime(filename)
+        }
+        save(info)
+
+def generateFile(filename):
     fileName = os.path.basename(filename)
     #print "XXX %s" % fileName
     if fileName != ".filecheck" and fileName != ".filecheck.tmp":
@@ -165,16 +186,21 @@ if __name__ == '__main__':
     subparsers = parser.add_subparsers(dest="command", help='command to execute')
 
     parser_generate = subparsers.add_parser('generate',  help='generate integrity files')
-    parser_generate.add_argument('directory', default=".", help='directory to generate')
+    parser_generate.add_argument('directory', nargs='?', default=".", help='directory to generate (defaults to current dir)')
     parser_generate.add_argument('-r', '--recursive', action='store_true', help='recurse into subdirectories')
     parser_generate.add_argument('-l', '--follow-links', action='store_true', help='follow symboly links')
 
 
     parser_check = subparsers.add_parser('check', help='check integrity of files')
-    parser_check.add_argument('directory', default=".", help='directory to check')
+    parser_check.add_argument('directory', nargs='?', default=".", help='directory to check (defaults to current dir)')
     parser_check.add_argument('-r', '--recursive', action='store_true', help='recurse into subdirectories')
     parser_check.add_argument('-l', '--follow-links', action='store_true', help='follow symboly links')
     parser_check.add_argument('-s', '--show-same-files', action='store_true', help='show files that are the same')
+    parser_check.add_argument('-A', '--ignore-atime', action='store_true', help='ignore access time')
+    parser_check.add_argument('-C', '--ignore-ctime', action='store_true', help='ignore creation time')
+    parser_check.add_argument('-M', '--ignore-mtime', action='store_true', help='ignore modification time')
+    parser_check.add_argument('-S', '--ignore-size', action='store_true', help='ignore size')
+    parser_check.add_argument('-H', '--ignore-hash', action='store_true', help='ignore hash (contents)')
 
     options = vars(parser.parse_args())
     globals()[options.pop('command')](options["directory"])
