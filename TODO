@@ -1,0 +1,3 @@
+* Add ignore file (.filecheckignore and option to change file)
+* Add new checksums
+* Make update commands (use MD5 only if file has changes in *time/size)
