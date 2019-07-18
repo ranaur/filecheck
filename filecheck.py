@@ -17,10 +17,14 @@ ignoreFiles = [filecheckName, filecheckTempName, ".git"]
 def md5(fileName):
     #print "executing md5 %s" % fileName
     hash_md5 = hashlib.md5()
-    with open(fileName, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest()
+    try:
+        with open(fileName, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hash_md5.update(chunk)
+    
+        return hash_md5.hexdigest()
+    except:
+    	return "error"
 
 def shouldIgnore(filename):
     fileName = os.path.basename(filename)
@@ -63,6 +67,19 @@ def save(info):
     with open(dbFile, "a+t") as f:
         f.write("%s:%d:%d:%d:%d:%s\r\n" % (info["hash"], info["size"], info["ctime"], info["mtime"], info["atime"], info["fileName"] ))
 
+def dump(data, dirName):
+    generateBegin(dirName)
+    for file, info in data.itens():
+        save(info)
+    generateEnd(dirName)
+
+def updateInfo(info):
+    dirName = info["dirName"]
+    dbFile = os.path.join(dirName, filecheckName)
+    data = loadFilecheck(dbName)
+    data[info["fileName"]] = info
+    dump(data, dirName)
+    
 def checkBegin(dirName):
     generateBegin(dirName)
 
@@ -151,8 +168,11 @@ def generateBegin(dirName):
     if os.path.isfile(dbFile):
         os.unlink(dbFile)
 
-    with open(dbFile, "a+t") as f:
-        f.write("%s%s:%s:%s\r\n" % ("\xef\xbb\xbf", "FILECHECK", version, signature ))
+    try:
+        with open(dbFile, "a+t") as f:
+            f.write("%s%s:%s:%s\r\n" % ("\xef\xbb\xbf", "FILECHECK", version, signature ))
+    except Exception as e:
+        print "ERROR: cannot begin generatcwion for dir %s: %s" % (dirName, str(e))
 
 def generateEnd(dirName):
     #print "generateEnd %s" % dirName
@@ -160,33 +180,62 @@ def generateEnd(dirName):
     dbDefFile = os.path.join(dirName, filecheckName)
     os.rename(dbFile, dbDefFile)
 
-def generateFileWithoutHash(filename):
-    _generateFile(filename, False)
+def generateFileWithoutHash(fileName):
+    _generateFile(fileName, False)
 
-def generateFile(filename):
-    _generateFile(filename, md5)
+def generateFile(fileName):
+    _generateFile(fileName, md5)
+            
+def _generateFile(fileName, hashFunc):
+    try:
+        if not shouldIgnore(fileName):
+            save(makeInfo(fileName))
+    except Exception as e:
+        print "ERROR: cannot generate %s: %s" % (fileName, str(e))
 
-def _generateFile(filename, hashFunc):
-    if not shouldIgnore(filename):
-        info = {
-            'dirName': os.path.dirname(filename),
-            'fileName': os.path.basename(filename),
-            'hash': hashFunc(filename) if callable(hashFunc) else "",
-            'size': os.path.getsize(filename),
-            'ctime': os.path.getctime(filename),
-            'mtime': os.path.getmtime(filename),
-            'atime': os.path.getatime(filename)
-        }
-        save(info)
+def makeInfo(fileName, hashFunc = False):
+    info = {
+        'dirName': os.path.dirname(fileName),
+        'fileName': os.path.basename(fileName),
+        'hash': hashFunc(fileName) if callable(hashFunc) else "",
+        'size': os.path.getsize(fileName),
+        'ctime': os.path.getctime(fileName),
+        'mtime': os.path.getmtime(fileName),
+        'atime': os.path.getatime(fileName)
+    }
+    return info
 
+updateData = {}
+def updateBegin(dirName):
+    global updateData
+    updateData = loadFilecheck(dirname)
+    
+def updateFile(fileName):
+    info = makeInfo(fileName)
+    oldInfo = updateData[fileName]
+    changed = False
+    if info["size"] != oldInfo["size"]:
+    	changed = True
+    if info["ctime"] != oldInfo["ctime"]:
+    	changed = True
+    if info["atime"] != oldInfo["atime"]:
+    	changed = True
+    if info["mtime"] != oldInfo["mtime"]:
+    	changed = True
+    if changed:
+        updateInfo(makeInfo(fileName, md5)) # podia salvar na variavel global e gravar so no fim
+    
 def generate(directory):
     print "GENERATE: " + directory
     walkTree(directory, generateFile, options["recursive"], options["follow_links"], generateBegin, generateEnd)
 
+def update(directory):
+    print "UPDATE: " + directory
+    walkTree(directory, updateFile, options["recursive"], options["follow_links"], False, False)
+
 def check(directory):
     print "CHECK: " + directory
     walkTree(directory, checkFile, options["recursive"], options["follow_links"], checkBegin, checkEnd)
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Check file integrity')
@@ -197,6 +246,10 @@ if __name__ == '__main__':
     parser_generate.add_argument('-r', '--recursive', action='store_true', help='recurse into subdirectories')
     parser_generate.add_argument('-l', '--follow-links', action='store_true', help='follow symboly links')
 
+    parser_generate = subparsers.add_parser('update',  help='update integrity files')
+    parser_generate.add_argument('directory', nargs='?', default=".", help='directory to generate (defaults to current dir)')
+    parser_generate.add_argument('-r', '--recursive', action='store_true', help='recurse into subdirectories')
+    parser_generate.add_argument('-l', '--follow-links', action='store_true', help='follow symboly links')
 
     parser_check = subparsers.add_parser('check', help='check integrity of files')
     parser_check.add_argument('directory', nargs='?', default=".", help='directory to check (defaults to current dir)')
