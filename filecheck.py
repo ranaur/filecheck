@@ -14,6 +14,9 @@ filecheckName = ".filecheck"
 filecheckTempName = ".filecheck.tmp"
 ignoreFiles = [filecheckName, filecheckTempName, ".git"]
 
+def error(message):
+    print "ERROR: %s" % message
+
 def md5(fileName):
     #print "executing md5 %s" % fileName
     hash_md5 = hashlib.md5()
@@ -33,9 +36,9 @@ def shouldIgnore(filename):
             return True
     return False
 
-def walkTree(top, callback, recursive, followLink, beginDirCallback = False, endDirCallback = False):
+def walkTree(top, callback, recursive, followLink, data, beginDirCallback = False, endDirCallback = False):
     if callable(beginDirCallback):
-        beginDirCallback(top)
+        data = beginDirCallback(top)
     for f in os.listdir(top):
         if not shouldIgnore(f):
             pathname = os.path.join(top, f)
@@ -51,80 +54,49 @@ def walkTree(top, callback, recursive, followLink, beginDirCallback = False, end
             if stat.S_ISDIR(mode):
                 if recursive:
                     # It's a directory, recurse into it
-                    walkTree(pathname, callback, recursive, followLink, beginDirCallback, endDirCallback)
+                    walkTree(pathname, callback, recursive, followLink, data, beginDirCallback, endDirCallback)
             elif stat.S_ISREG(mode):
                 # It's a file, call the callback function
-                    callback(pathname)
+                    callback(pathname, data)
             else:
                 # Unknown file type, print a message
                 print 'Skipping %s' % pathname
     if callable(endDirCallback):
-        endDirCallback(top)
+        endDirCallback(top, data)
 
-def save(info):
-    dirName = info["dirName"]
-    dbFile = os.path.join(dirName, filecheckTempName)
-    with open(dbFile, "a+t") as f:
-        f.write("%s:%d:%d:%d:%d:%s\r\n" % (info["hash"], info["size"], info["ctime"], info["mtime"], info["atime"], info["fileName"] ))
 
-def dump(data, dirName):
-    generateBegin(dirName)
-    for file, info in data.itens():
-        save(info)
-    generateEnd(dirName)
+def filecheckNew(dirName):
+    data = {}
+    data["dirName"] = dirName
+    data["files"] = {} 
+    return data
 
-def updateInfo(info):
-    dirName = info["dirName"]
+def filecheckSet(data, info):
+    data["files"][info["fileName"]] = info
+
+def filecheckSave(data, dirName):
+    dirName = data["dirName"]
     dbFile = os.path.join(dirName, filecheckName)
-    data = loadFilecheck(dbName)
-    data[info["fileName"]] = info
-    dump(data, dirName)
-    
-def checkBegin(dirName):
-    generateBegin(dirName)
 
-def checkFile(fileName):
-    generateFileWithoutHash(fileName)
+    try:
+        if os.path.isfile(dbFile):
+            os.unlink(dbFile)
 
-def compareData(current, saved, dirName):
-    showSameFile = options["show_same_files"]
-    for key, currentValue in current.iteritems():
-        status = "pending"
-        if not saved.has_key(key):
-            status = "new item"
-        else:
-            savedValue = saved[key]
-            if not options["ignore_size"] and savedValue["size"] != currentValue["size"]:
-                status = "size mismatch"
-            elif not options["ignore_mtime"] and savedValue["mtime"] != currentValue["mtime"]:
-                status = "mtime mismatch"
-            elif not options["ignore_atime"] and savedValue["atime"] != currentValue["atime"]:
-                status = "atime mismatch"
-            elif not options["ignore_ctime"] and savedValue["ctime"] != currentValue["ctime"]:
-                status = "ctime mismatch"
-            else:
-                if not options["ignore_hash"] and currentValue["hash"] == "" and savedValue["hash"] != "":
-                    currentValue["hash"] = md5(os.path.join(currentValue["dirName"], currentValue["fileName"]))
+        with open(dbFile, "a+t") as f:
+            f.write("%s%s:%s:%s\r\n" % ("\xef\xbb\xbf", "FILECHECK", version, signature ))
+        
+            for fn, info in data["files"].items():
+                f.write("%s:%ld:%.10f:%.10f:%.10f:%s\r\n" % (info["hash"], info["size"], info["ctime"], info["mtime"], info["atime"], info["fileName"] ))
+    except Exception as e:
+        error("cannot save info for dir %s: %s" % (filecheckDirName, str(e)))
 
-                if not options["ignore_hash"] and savedValue["hash"] != currentValue["hash"]:
-                    status = "MD5 mismatch"
-                else:
-                    status = "same file"
-            del saved[key]
-        if showSameFile or status != "same file":
-            print "%s: %s" % (status, os.path.join(dirName, key))
-    for key, savedValue in saved.iteritems():
-        print "%s: %s" % ("deleted file", os.path.join(dirName, key))
- 
-def error(message):
-    print "ERROR: %s" % message
-
-def loadFilecheck(fileName):
-    #print "loadFilecheck(%s)" % fileName
-    res = {}
+def filecheckLoad(dirName):
+    #print "loadFilecheck(%s)" % dirName
+    fileName = os.path.join(dirName, filecheckName)
+    res = filecheckNew(dirName)
     header = False
     if not os.path.isfile(fileName):
-        return {}
+        return res
 
     with open(fileName, "rt") as f:
         for line in f:
@@ -142,56 +114,89 @@ def loadFilecheck(fileName):
                     'dirName': os.path.dirname(fileName),
                     'fileName': lineFields[5].rstrip("\n\r"),
                     'hash': lineFields[0],
-                    'size': lineFields[1],
-                    'ctime': lineFields[2],
-                    'mtime': lineFields[3],
-                    'atime': lineFields[4]
+                    'size': int(lineFields[1]),
+                    'ctime': float(lineFields[2]),
+                    'mtime': float(lineFields[3]),
+                    'atime': float(lineFields[4])
                 }
-                res[data["fileName"]] = data
+                res["files"][data["fileName"]] = data
+    # print res
     return res
 
-def checkEnd(dirName):
-    currentFile = os.path.join(dirName, filecheckTempName)
-    currentData = loadFilecheck(currentFile)
-    savedData = loadFilecheck(os.path.join(dirName, filecheckName))
+def checkBegin(dirName):
+    return generateBegin(dirName)
 
-    #print currentData
+def checkFile(fileName, data):
+    generateFileWithoutHash(fileName, data)
+
+def compareData(current, saved, dirName):
+    #print "CURRENT"
+    #print current
+    #print "SAVED"
+    #print saved
+    showSameFile = options["show_same_files"]
+    for key, currentValue in current["files"].iteritems():
+        status = "pending"
+        if not saved["files"].has_key(key):
+            status = "new item"
+        else:
+            savedValue = saved["files"][key]
+            if not options["ignore_size"] and savedValue["size"] != currentValue["size"]:
+
+                status = "size mismatch"
+            elif not options["ignore_mtime"] and savedValue["mtime"] != currentValue["mtime"]:
+                #print "saved %s / current %s" % (type(savedValue["mtime"]), type(currentValue["mtime"]))
+                #print "saved %s / current %s" % (savedValue["mtime"], currentValue["mtime"])
+                status = "mtime mismatch"
+            elif not options["ignore_atime"] and savedValue["atime"] != currentValue["atime"]:
+                status = "atime mismatch"
+            elif not options["ignore_ctime"] and savedValue["ctime"] != currentValue["ctime"]:
+                status = "ctime mismatch"
+            else:
+                if not options["ignore_hash"] and currentValue["hash"] == "" and savedValue["hash"] != "":
+                    currentValue["hash"] = md5(os.path.join(currentValue["dirName"], currentValue["fileName"]))
+
+                if not options["ignore_hash"] and savedValue["hash"] != currentValue["hash"]:
+                    status = "MD5 mismatch"
+                else:
+                    status = "same file"
+            del saved["files"][key]
+        if showSameFile or status != "same file":
+            print "%s: %s" % (status, os.path.join(dirName, key))
+    for key, savedValue in saved["files"].iteritems():
+        print "%s: %s" % ("deleted file", os.path.join(dirName, key))
+ 
+def checkEnd(dirName, data):
+    #print "checkEnd(%s)" % dirName
+    savedData = filecheckLoad(dirName)
+
+    #print "SAVED DATA"
     #print savedData
-    compareData(currentData, savedData, dirName)
-
-    os.unlink(currentFile)
+    #print "FILECHECK DATA"
+    #print filecheckData
+    compareData(data, savedData, dirName)
 
 def generateBegin(dirName):
     #print "generateBegin %s" % dirName
-    dbFile = os.path.join(dirName, filecheckTempName)
+    return filecheckNew(dirName)
 
-    if os.path.isfile(dbFile):
-        os.unlink(dbFile)
 
-    try:
-        with open(dbFile, "a+t") as f:
-            f.write("%s%s:%s:%s\r\n" % ("\xef\xbb\xbf", "FILECHECK", version, signature ))
-    except Exception as e:
-        print "ERROR: cannot begin generatcwion for dir %s: %s" % (dirName, str(e))
-
-def generateEnd(dirName):
+def generateEnd(dirName, data):
     #print "generateEnd %s" % dirName
-    dbFile = os.path.join(dirName, filecheckTempName)
-    dbDefFile = os.path.join(dirName, filecheckName)
-    os.rename(dbFile, dbDefFile)
+    filecheckSave(data, dirName)
 
-def generateFileWithoutHash(fileName):
-    _generateFile(fileName, False)
+def generateFileWithoutHash(fileName, data):
+    _generateFile(fileName, data, False)
 
-def generateFile(fileName):
-    _generateFile(fileName, md5)
+def generateFile(fileName, data):
+    _generateFile(fileName, data, md5)
             
-def _generateFile(fileName, hashFunc):
+def _generateFile(fileName, data, hashFunc):
     try:
         if not shouldIgnore(fileName):
-            save(makeInfo(fileName))
+            filecheckSet(data, makeInfo(fileName, hashFunc))
     except Exception as e:
-        print "ERROR: cannot generate %s: %s" % (fileName, str(e))
+        error("cannot generate info for file %s: %s" % (fileName, str(e)))
 
 def makeInfo(fileName, hashFunc = False):
     info = {
@@ -205,37 +210,51 @@ def makeInfo(fileName, hashFunc = False):
     }
     return info
 
-updateData = {}
 def updateBegin(dirName):
-    global updateData
-    updateData = loadFilecheck(dirname)
-    
-def updateFile(fileName):
-    info = makeInfo(fileName)
-    oldInfo = updateData[fileName]
-    changed = False
-    if info["size"] != oldInfo["size"]:
-    	changed = True
-    if info["ctime"] != oldInfo["ctime"]:
-    	changed = True
-    if info["atime"] != oldInfo["atime"]:
-    	changed = True
-    if info["mtime"] != oldInfo["mtime"]:
-    	changed = True
+    updateData = {}
+    updateData["old"] = filecheckLoad(dirName)
+    updateData["new"] = filecheckNew(dirName)
+    return updateData 
+
+def updateFile(fileName, data):
+    #print data
+    generateFileWithoutHash(fileName, data["new"])
+    baseName = os.path.basename(fileName)
+    newInfo = data["new"]["files"][baseName]
+    if data["old"]["files"].has_key(baseName):
+        oldInfo = data["old"]["files"][baseName]
+
+        changed = False
+        if newInfo["size"] != oldInfo["size"]:
+            changed = True
+        elif newInfo["ctime"] != oldInfo["ctime"]:
+            changed = True
+        elif newInfo["atime"] != oldInfo["atime"]:
+            changed = True
+        elif newInfo["mtime"] != oldInfo["mtime"]:
+            changed = True
+    else:
+        changed = True
     if changed:
-        updateInfo(makeInfo(fileName, md5)) # podia salvar na variavel global e gravar so no fim
-    
+        print "Regenerating %s." % fileName
+        generateFile(fileName, data["new"])
+    else:
+        print "File %s not changed. Skipped." % fileName
+
+def updateEnd(dirName, data):
+    filecheckSave(data["new"], dirName)
+
 def generate(directory):
     print "GENERATE: " + directory
-    walkTree(directory, generateFile, options["recursive"], options["follow_links"], generateBegin, generateEnd)
+    walkTree(directory, generateFile, options["recursive"], options["follow_links"], {}, generateBegin, generateEnd)
 
 def update(directory):
     print "UPDATE: " + directory
-    walkTree(directory, updateFile, options["recursive"], options["follow_links"], False, False)
+    walkTree(directory, updateFile, options["recursive"], options["follow_links"], {}, updateBegin, updateEnd)
 
 def check(directory):
     print "CHECK: " + directory
-    walkTree(directory, checkFile, options["recursive"], options["follow_links"], checkBegin, checkEnd)
+    walkTree(directory, checkFile, options["recursive"], options["follow_links"], {}, checkBegin, checkEnd)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Check file integrity')
