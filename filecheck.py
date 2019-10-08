@@ -12,7 +12,7 @@ from fnmatch import fnmatch
 options = {}
 filecheckName = ".filecheck"
 filecheckTempName = ".filecheck.tmp"
-ignoreFiles = [filecheckName, filecheckTempName, ".git"]
+ignoreFiles = [filecheckName, filecheckTempName, ".git", "._Icon*", "Icon*", ".DS_Store" ]
 
 def error(message):
     print "ERROR: %s" % message
@@ -109,7 +109,7 @@ def filecheckLoad(dirName):
                     return False
                 header = True
             else:
-                lineFields = line.split(":")
+                lineFields = line.split(":", 5)
                 data = {
                     'dirName': os.path.dirname(fileName),
                     'fileName': lineFields[5].rstrip("\n\r"),
@@ -144,13 +144,13 @@ def compareData(current, saved, dirName):
             if not options["ignore_size"] and savedValue["size"] != currentValue["size"]:
 
                 status = "size mismatch"
-            elif not options["ignore_mtime"] and savedValue["mtime"] != currentValue["mtime"]:
-                #print "saved %s / current %s" % (type(savedValue["mtime"]), type(currentValue["mtime"]))
-                #print "saved %s / current %s" % (savedValue["mtime"], currentValue["mtime"])
+            elif not options["ignore_mtime"] and int(savedValue["mtime"]) != int(currentValue["mtime"]):
+                print "saved %s / current %s" % (type(savedValue["mtime"]), type(currentValue["mtime"]))
+                print "saved %s / current %s" % (savedValue["mtime"], currentValue["mtime"])
                 status = "mtime mismatch"
-            elif not options["ignore_atime"] and savedValue["atime"] != currentValue["atime"]:
+            elif not options["ignore_atime"] and int(savedValue["atime"]) != int(currentValue["atime"]):
                 status = "atime mismatch"
-            elif not options["ignore_ctime"] and savedValue["ctime"] != currentValue["ctime"]:
+            elif not options["ignore_ctime"] and int(savedValue["ctime"]) != int(currentValue["ctime"]):
                 status = "ctime mismatch"
             else:
                 if not options["ignore_hash"] and currentValue["hash"] == "" and savedValue["hash"] != "":
@@ -164,7 +164,8 @@ def compareData(current, saved, dirName):
         if showSameFile or status != "same file":
             print "%s: %s" % (status, os.path.join(dirName, key))
     for key, savedValue in saved["files"].iteritems():
-        print "%s: %s" % ("deleted file", os.path.join(dirName, key))
+        if not shouldIgnore(key):
+            print "%s: %s" % ("deleted file", os.path.join(dirName, key))
  
 def checkEnd(dirName, data):
     #print "checkEnd(%s)" % dirName
@@ -238,8 +239,8 @@ def updateFile(fileName, data):
     if changed:
         print "Regenerating %s." % fileName
         generateFile(fileName, data["new"])
-    else:
-        print "File %s not changed. Skipped." % fileName
+    #else:
+    #    print "File %s not changed. Skipped." % fileName
 
 def updateEnd(dirName, data):
     filecheckSave(data["new"], dirName)
