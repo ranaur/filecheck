@@ -124,6 +124,8 @@ def filecheckLoad(dirName):
     return res
 
 def checkBegin(dirName):
+    if options['verbose']:
+        print dirName
     return generateBegin(dirName)
 
 def checkFile(fileName, data):
@@ -178,6 +180,8 @@ def checkEnd(dirName, data):
     compareData(data, savedData, dirName)
 
 def generateBegin(dirName):
+    if options['verbose']:
+        print dirName
     #print "generateBegin %s" % dirName
     return filecheckNew(dirName)
 
@@ -212,6 +216,8 @@ def makeInfo(fileName, hashFunc = False):
     return info
 
 def updateBegin(dirName):
+    if options['verbose']:
+        print dirName
     updateData = {}
     updateData["old"] = filecheckLoad(dirName)
     updateData["new"] = filecheckNew(dirName)
@@ -259,6 +265,7 @@ def check(directory):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Check file integrity')
+    parser.add_argument('-v', '--verbose', action='store_true', help='display more info')
     subparsers = parser.add_subparsers(dest="command", help='command to execute')
 
     parser_generate = subparsers.add_parser('generate',  help='generate integrity files')
