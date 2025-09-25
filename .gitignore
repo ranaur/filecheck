@@ -1,3 +1,4 @@
 .filecheck
 .filecheck.tmp
-test
+*/.filecheck
+*/.filecheck.tmp
