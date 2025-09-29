@@ -2,7 +2,7 @@
 MD5 file checker to verify backup copies
 
 # Summary
-[c:\Trove\my-git\filecheck\filecheck.py](cci:7://file:///c:/Trove/my-git/filecheck/filecheck.py:0:0-0:0) is a Python 2 CLI tool to track and verify file integrity for a directory. It creates and maintains a `.filecheck` manifest recording each file’s MD5 hash, size, and timestamps, and can later compare current files against that manifest to report changes.
+[c:\Trove\my-git\filecheck\filecheck.py](cci:7://file:///c:/Trove/my-git/filecheck/filecheck.py:0:0-0:0) is a Python 3 CLI tool to track and verify file integrity for a directory. It creates and maintains a `.filecheck` manifest recording each file’s MD5 hash, size, and timestamps, and can later compare current files against that manifest to report changes.
 
 # How it works
 - **Manifest file**: Stored at `DIR/.filecheck` with a header and one line per entry.
