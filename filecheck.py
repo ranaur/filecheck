@@ -10,6 +10,7 @@ from fnmatch import fnmatch
 version="0.1"
 # LONG RIGHTWARDS DOUBLE ARROW (U+27F9)   e29fb9
 signature = b"\xe2\x9f\xb9".decode('utf-8')
+endline="\r\r\n" # originally was writting this. XXX to fix
 
 options = {}
 filecheckName = ".filecheck"
@@ -80,17 +81,18 @@ def filecheckSet(data, info):
     data["files"][info["fileName"]] = info
 
 def filecheckSave(data, dirName):
+    #print("filecheckSave: ", data, dirName)
     dirName = data["dirName"]
     dbFile = os.path.join(dirName, filecheckName)
-
+    #print("dbFile: ", dbFile)
     try:
         if os.path.isfile(dbFile):
             os.unlink(dbFile)
-        if len(data["files"]) > 0:
+        if len(data["files"]) >= 0:
             with open(dbFile, "a+t", encoding='utf-8') as f:
-                f.write(f"\ufeffFILECHECK:{version}:{signature}\r\n")
+                f.write(f"\ufeffFILECHECK:{version}:{signature}{endline}")
                 for fn, info in data["files"].items():
-                    line=f"{info['hash']}:{info['size']}:{info['ctime']:.10f}:{info['mtime']:.10f}:{info['atime']:.10f}:{info['fileName']}\r\n"
+                    line=f"{info['hash']}:{info['size']}:{info['ctime']:.10f}:{info['mtime']:.10f}:{info['atime']:.10f}:{info['fileName']}{endline}"
                     f.write(line)
     except Exception as e:
         error(f"cannot save info for dir {dirName}: {e}")
