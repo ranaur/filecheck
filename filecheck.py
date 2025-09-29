@@ -88,9 +88,9 @@ def filecheckSave(data, dirName):
             os.unlink(dbFile)
         if len(data["files"]) > 0:
             with open(dbFile, "a+t", encoding='utf-8') as f:
-                f.write(f"\ufeffFILECHECK:{version}:{signature}\r\r\n")
+                f.write(f"\ufeffFILECHECK:{version}:{signature}\r\n")
                 for fn, info in data["files"].items():
-                    line=f"{info['hash']}:{info['size']}:{info['ctime']:.10f}:{info['mtime']:.10f}:{info['atime']:.10f}:{info['fileName']}\r\r\n"
+                    line=f"{info['hash']}:{info['size']}:{info['ctime']:.10f}:{info['mtime']:.10f}:{info['atime']:.10f}:{info['fileName']}\r\n"
                     f.write(line)
     except Exception as e:
         error(f"cannot save info for dir {dirName}: {e}")
