@@ -2,3 +2,4 @@
 .filecheck.tmp
 */.filecheck
 */.filecheck.tmp
+tests/test
