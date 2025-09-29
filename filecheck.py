@@ -91,7 +91,7 @@ def filecheckSave(data, dirName):
                 for fn, info in data["files"].items():
                     f.write("%s:%ld:%.10f:%.10f:%.10f:%s\r\n" % (info["hash"], info["size"], info["ctime"], info["mtime"], info["atime"], info["fileName"] ))
     except Exception as e:
-        error("cannot save info for dir %s: %s" % (filecheckDirName, str(e)))
+        error("cannot save info for dir %s: %s" % (dirName, str(e)))
 
 def filecheckLoad(dirName):
     #print "loadFilecheck(%s)" % dirName
