@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 import os
 import shutil
 import subprocess
@@ -10,19 +10,19 @@ def run_command(cmd, cwd=None):
     """Run a shell command and return (stdout, stderr, returncode)"""
     return_code=0
     try:
-        print("run_command: ", cmd, cwd)
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
+        #print("run_command: ", cmd, cwd)
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, shell=True)
         stdout, stderr = process.communicate()
         return_code = process.returncode
-        print (stdout, stderr, return_code)
+        #print (stdout, stderr, return_code)
     except subprocess.CalledProcessError as e:
         return_code = e.returncode
     return (stdout, stderr, return_code)
 
 def run_filecheck(test_dir, args):
     """Run filecheck and return (stdout, stderr, returncode)"""
-    command = "python "+ os.path.join(current_dir,"filecheck.py") + " " + args
-    print(command)
+    command = "python3 "+ os.path.join(current_dir,"filecheck.py") + " " + args
+    #print(command)
 
     return run_command(command, cwd=test_dir)
 
@@ -48,7 +48,7 @@ def test_generate_basic():
         # Run generate
         stdout, stderr, rc = run_filecheck(test_dir, "generate .")
         assert rc == 0, "Generate failed: "+ str(stderr)
-        assert 'GENERATE:' in stdout
+        assert 'GENERATE:' in str(stdout)
         
         # Check .filecheck exists
         filecheck_path = os.path.join(test_dir, '.filecheck')
@@ -57,6 +57,7 @@ def test_generate_basic():
         # Verify content (basic check for header and entries)
         with open(filecheck_path, 'r') as f:
             lines = f.readlines()
+        #print(lines)
         assert len(lines) >= 3, "Expected at least header + 2 entries"
         assert lines[0].startswith('\xef\xbb\xbfFILECHECK'), "Invalid header"
         
@@ -78,8 +79,8 @@ def test_check_no_changes():
         
         # Run check
         stdout, stderr, rc = run_filecheck(test_dir, "check .")
-        assert rc == 0, "Check failed: "+stderr
-        assert 'CHECK: .' in stdout or stdout == '', "Expected no changes or same file"
+        assert rc == 0, "Check failed: "+str(stderr)
+        assert 'CHECK: .' in str(stdout) or str(stdout) == '', "Expected no changes or same file"
         
     finally:
         shutil.rmtree(test_dir)
@@ -103,7 +104,7 @@ def test_check_file_modified():
         # Run check
         stdout, stderr, rc = run_filecheck(test_dir, "check .")
         assert rc == 0, "Check failed: " + str(stderr)
-        assert 'MD5 mismatch' in stdout or 'mtime mismatch' in stdout, "Expected mismatch detection"
+        assert 'MD5 mismatch' in str(stdout) or 'mtime mismatch' in str(stdout), "Expected mismatch detection"
         
     finally:
         shutil.rmtree(test_dir)
@@ -127,7 +128,7 @@ def test_update():
         # Run update
         stdout, stderr, rc = run_filecheck(test_dir, "update .")
         assert rc == 0, "Update failed: " + str(stderr)
-        assert 'UPDATE:' in stdout
+        assert 'UPDATE:' in str(stdout)
         
         # Verify .filecheck is updated (check if MD5 changed)
         filecheck_path = os.path.join(test_dir, '.filecheck')
