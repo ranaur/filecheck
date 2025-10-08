@@ -1,36 +1,34 @@
-#!/usr/bin/env python3
-import traceback
-import sys
+#!/usr/bin/env python2
+version="0.1"
+# LONG RIGHTWARDS DOUBLE ARROW (U+27F9)   e29fb9
+signature = "\xe2\x9f\xb9";
+
 import argparse
 import os
 import stat
 import hashlib
+import datetime
 from fnmatch import fnmatch
-
-version="0.1"
-# LONG RIGHTWARDS DOUBLE ARROW (U+27F9)   e29fb9
-signature = b"\xe2\x9f\xb9".decode('utf-8')
-endline="\r\r\n" # originally was writting this. XXX to fix
 
 options = {}
 filecheckName = ".filecheck"
 filecheckTempName = ".filecheck.tmp"
-ignoreFiles = [filecheckName, filecheckTempName, ".git", "._Icon*", "Icon*", ".DS_Store"]
+ignoreFiles = [filecheckName, filecheckTempName, ".git", "._Icon*", "Icon*", ".DS_Store" ]
 
 def error(message):
-    print(f"ERROR: {message}")
+    print "ERROR: %s" % message
 
 def md5(fileName):
-    #print(f"executing md5 {fileName}")
+    #print "executing md5 %s" % fileName
     hash_md5 = hashlib.md5()
     try:
         with open(fileName, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
                 hash_md5.update(chunk)
+
         return hash_md5.hexdigest()
-    except Exception as e:
-        print(f"Error calculating MD5 for {fileName}: {e}")
-        return "error"
+    except:
+    	return "error"
 
 def shouldIgnore(filename):
     fileName = os.path.basename(filename)
@@ -39,7 +37,7 @@ def shouldIgnore(filename):
             return True
     return False
 
-def walkTree(top, callback, recursive, followLink, data, beginDirCallback=False, endDirCallback=False):
+def walkTree(top, callback, recursive, followLink, data, beginDirCallback = False, endDirCallback = False):
     if callable(beginDirCallback):
         data = beginDirCallback(top)
     for f in os.listdir(top):
@@ -48,25 +46,24 @@ def walkTree(top, callback, recursive, followLink, data, beginDirCallback=False,
 
             try:
                 mode = os.lstat(pathname).st_mode
-            except Exception as e:
-                print(f"cannot stat {pathname}: {e}")
+            except:
+                print "cannot stat %s" % pathname
                 continue
-                
-            if stat.S_ISLNK(mode) and not followLink:
+            if stat.S_ISLNK(mode):
                 continue
-            
+
             if stat.S_ISDIR(mode):
-                # also save DIRs
+                    # also save DIRs
                 callback(pathname, data)
                 if recursive:
                     # It's a directory, recurse into it
                     walkTree(pathname, callback, recursive, followLink, data, beginDirCallback, endDirCallback)
             elif stat.S_ISREG(mode):
                 # It's a file, call the callback function
-                callback(pathname, data)
+                    callback(pathname, data)
             else:
                 # Unknown file type, print a message
-                print(f'Skipping {pathname}')
+                print 'Skipping %s' % pathname
     if callable(endDirCallback):
         endDirCallback(top, data)
 
@@ -81,69 +78,71 @@ def filecheckSet(data, info):
     data["files"][info["fileName"]] = info
 
 def filecheckSave(data, dirName):
-    #print("filecheckSave: ", data, dirName)
     dirName = data["dirName"]
     dbFile = os.path.join(dirName, filecheckName)
-    #print("dbFile: ", dbFile)
+
     try:
         if os.path.isfile(dbFile):
             os.unlink(dbFile)
-        if len(data["files"]) >= 0:
-            with open(dbFile, "a+t", encoding='utf-8') as f:
-                f.write(f"\ufeffFILECHECK:{version}:{signature}{endline}")
+        if len(data["files"]) > 0:
+            with open(dbFile, "a+t") as f:
+                f.write("%s%s:%s:%s\r\n" % ("\xef\xbb\xbf", "FILECHECK", version, signature ))
+
                 for fn, info in data["files"].items():
-                    line=f"{info['hash']}:{info['size']}:{info['ctime']:.10f}:{info['mtime']:.10f}:{info['atime']:.10f}:{info['fileName']}{endline}"
-                    f.write(line)
+                    f.write("%s:%ld:%.10f:%.10f:%.10f:%s\r\n" % (info["hash"], info["size"], info["ctime"], info["mtime"], info["atime"], info["fileName"] ))
     except Exception as e:
-        error(f"cannot save info for dir {dirName}: {e}")
-        traceback.print_exc() # Prints the full exception traceback
+        error("cannot save info for dir %s: %s" % (dirName, str(e)))
 
 def filecheckLoad(dirName):
+    #print "loadFilecheck(%s)" % dirName
     fileName = os.path.join(dirName, filecheckName)
     res = filecheckNew(dirName)
     header = False
     if not os.path.isfile(fileName):
         return res
 
-    with open(fileName, "rt", encoding="utf-8") as f:
+    with open(fileName, "rt") as f:
         for line in f:
             if not header:
-                headerFields = line.strip().split(":")
-                if len(headerFields) < 3 or \
-                   headerFields[0] != "\ufeffFILECHECK" or \
-                   headerFields[1] != version or \
-                   headerFields[2] != signature:
+                headerFields = line.split(":")
+                if headerFields[0] != "\xef\xbb\xbfFILECHECK" or \
+                    headerFields[1] != version or \
+                    headerFields[2] != signature + '\r\n':
                     error("Invalid header")
                     return False
                 header = True
             else:
-                lineFields = line.strip().split(":", 5)
-                if len(lineFields) >= 6:
-                    data = {
-                        'dirName': os.path.dirname(fileName),
-                        'fileName': lineFields[5],
-                        'hash': lineFields[0],
-                        'size': int(lineFields[1]),
-                        'ctime': float(lineFields[2]),
-                        'mtime': float(lineFields[3]),
-                        'atime': float(lineFields[4])
-                    }
-                    res["files"][data["fileName"]] = data
+                lineFields = line.split(":", 5)
+                data = {
+                    'dirName': os.path.dirname(fileName),
+                    'fileName': lineFields[5].rstrip("\n\r"),
+                    'hash': lineFields[0],
+                    'size': int(lineFields[1]),
+                    'ctime': float(lineFields[2]),
+                    'mtime': float(lineFields[3]),
+                    'atime': float(lineFields[4])
+                }
+                res["files"][data["fileName"]] = data
+    # print res
     return res
 
 def checkBegin(dirName):
     if options['verbose']:
-        print(dirName)
+        print dirName
     return generateBegin(dirName)
 
 def checkFile(fileName, data):
     generateFileWithoutHash(fileName, data)
 
 def compareData(current, saved, dirName):
+    #print "CURRENT"
+    #print current
+    #print "SAVED"
+    #print saved
     showSameFile = options["show_same_files"]
-    for key, currentValue in current["files"].items():
+    for key, currentValue in current["files"].iteritems():
         status = "pending"
-        if key not in saved["files"]:
+        if not saved["files"].has_key(key):
             status = "new item"
         else:
             savedValue = saved["files"][key]
@@ -153,14 +152,20 @@ def compareData(current, saved, dirName):
                 else:
                     status = "same file"
             elif not options["ignore_size"] and savedValue["size"] != currentValue["size"]:
+
                 status = "size mismatch"
             elif not options["ignore_mtime"] and int(savedValue["mtime"]) != int(currentValue["mtime"]):
+                #print "saved %s / current %s" % (type(savedValue["mtime"]), type(currentValue["mtime"]))
+                #print "saved %s / current %s" % (datetime.datetime.fromtimestamp(savedValue["mtime"]), datetime.datetime.fromtimestamp(currentValue["mtime"]))
                 status = "mtime mismatch"
             elif options["check_atime"] and int(savedValue["atime"]) != int(currentValue["atime"]):
+                #print "saved %s / current %s" % (datetime.datetime.fromtimestamp(savedValue["atime"]), datetime.datetime.fromtimestamp(currentValue["atime"]))
                 status = "atime mismatch"
             elif options["check_ctime"] and int(savedValue["ctime"]) != int(currentValue["ctime"]):
+                #print "saved %s / current %s" % (datetime.datetime.fromtimestamp(savedValue["ctime"]), datetime.datetime.fromtimestamp(currentValue["ctime"]))
                 status = "ctime mismatch"
             else:
+
                 if not options["ignore_hash"] and currentValue["hash"] == "" and savedValue["hash"] != "":
                     currentValue["hash"] = md5(os.path.join(currentValue["dirName"], currentValue["fileName"]))
 
@@ -170,21 +175,30 @@ def compareData(current, saved, dirName):
                     status = "same file"
             del saved["files"][key]
         if showSameFile or status != "same file":
-            print(f"{status}: {os.path.join(dirName, key)}")
-    for key, savedValue in saved["files"].items():
+            print "%s: %s" % (status, os.path.join(dirName, key))
+    for key, savedValue in saved["files"].iteritems():
         if not shouldIgnore(key):
-            print(f"deleted file: {os.path.join(dirName, key)}")
+            print "%s: %s" % ("deleted file", os.path.join(dirName, key))
 
 def checkEnd(dirName, data):
+    #print "checkEnd(%s)" % dirName
     savedData = filecheckLoad(dirName)
+
+    #print "SAVED DATA"
+    #print savedData
+    #print "FILECHECK DATA"
+    #print filecheckData
     compareData(data, savedData, dirName)
 
 def generateBegin(dirName):
     if options['verbose']:
-        print(dirName)
+        print dirName
+    #print "generateBegin %s" % dirName
     return filecheckNew(dirName)
 
+
 def generateEnd(dirName, data):
+    #print "generateEnd %s" % dirName
     filecheckSave(data, dirName)
 
 def generateFileWithoutHash(fileName, data):
@@ -198,79 +212,75 @@ def _generateFile(fileName, data, hashFunc):
         if not shouldIgnore(fileName):
             filecheckSet(data, makeInfo(fileName, hashFunc))
     except Exception as e:
-        error(f"cannot generate info for file {fileName}: {e}")
-            
-def makeInfo(fileName, hashFunc=False):
+        error("cannot generate info for file %s: %s" % (fileName, str(e)))
+
+def makeInfo(fileName, hashFunc = False):
     if os.path.isdir(fileName):
-        hash_val = "<DIR>"
+        hash = "<DIR>"
     else:
-        hash_val = hashFunc(fileName) if callable(hashFunc) else ""
-    
-    try:
-        stat_info = os.stat(fileName)
-        info = {
-            'dirName': os.path.dirname(fileName),
-            'fileName': os.path.basename(fileName),
-            'hash': hash_val,
-            'size': stat_info.st_size,
-            'ctime': stat_info.st_birthtime or stat_info.st_ctime,
-            'mtime': stat_info.st_mtime,
-            'atime': stat_info.st_atime
-        }
-        return info
-    except Exception as e:
-        error(f"Error getting file info for {fileName}: {e}")
-        return None
+        hash = hashFunc(fileName) if callable(hashFunc) else ""
+    info = {
+        'dirName': os.path.dirname(fileName),
+        'fileName': os.path.basename(fileName),
+        'hash': hash,
+        'size': os.path.getsize(fileName),
+        'ctime': os.path.getctime(fileName),
+        'mtime': os.path.getmtime(fileName),
+        'atime': os.path.getatime(fileName)
+    }
+    return info
 
 def updateBegin(dirName):
     if options['verbose']:
-        print(dirName)
+        print dirName
     updateData = {}
     updateData["old"] = filecheckLoad(dirName)
     updateData["new"] = filecheckNew(dirName)
     return updateData
 
 def updateFile(fileName, data):
+    #print data
     generateFileWithoutHash(fileName, data["new"])
     baseName = os.path.basename(fileName)
     newInfo = data["new"]["files"][baseName]
-    
-    if baseName in data["old"]["files"]:
+    if data["old"]["files"].has_key(baseName):
         oldInfo = data["old"]["files"][baseName]
+
         changed = False
         if not options["ignore_size"] and newInfo["size"] != oldInfo["size"]:
-            print("reason: size")
+            print "reason: size"
             changed = True
-        elif options["check_ctime"] and int(newInfo["ctime"]) != int(oldInfo["ctime"]):
-            print("reason: ctime")
+        elif options["check_ctime"] and newInfo["ctime"] != oldInfo["ctime"]:
+            print "reason: ctime"
             changed = True
-        elif options["check_atime"] and int(newInfo["atime"]) != int(oldInfo["atime"]):
+        elif options["check_atime"] and newInfo["atime"] != oldInfo["atime"]:
             changed = True
-        elif not options["ignore_mtime"] and int(newInfo["mtime"]) != int(oldInfo["mtime"]):
-            print("reason: mtime")
+        elif not options["ignore_mtime"] and newInfo["mtime"] != oldInfo["mtime"]:
+            print "reason: mtime"
             changed = True
     else:
         changed = True
-        
     if changed:
-        print(f"Regenerating {fileName}.")
+        print "Regenerating %s." % fileName
         generateFile(fileName, data["new"])
     else:
         data["new"]["files"][baseName]["hash"] = oldInfo["hash"]
+    #else:
+    #    print "File %s not changed. Skipped." % fileName
 
 def updateEnd(dirName, data):
     filecheckSave(data["new"], dirName)
 
 def generate(directory):
-    print(f"GENERATE: {directory}")
+    print "GENERATE: " + directory
     walkTree(directory, generateFile, options["recursive"], options["follow_links"], {}, generateBegin, generateEnd)
 
 def update(directory):
-    print(f"UPDATE: {directory}")
+    print "UPDATE: " + directory
     walkTree(directory, updateFile, options["recursive"], options["follow_links"], {}, updateBegin, updateEnd)
 
 def check(directory):
-    print(f"CHECK: {directory}")
+    print "CHECK: " + directory
     walkTree(directory, checkFile, options["recursive"], options["follow_links"], {}, checkBegin, checkEnd)
 
 if __name__ == '__main__':
@@ -278,27 +288,24 @@ if __name__ == '__main__':
     parser.add_argument('-v', '--verbose', action='store_true', help='display more info')
     subparsers = parser.add_subparsers(dest="command", help='command to execute')
 
-    # Generate subcommand
-    parser_generate = subparsers.add_parser('generate', help='generate integrity files')
+    parser_generate = subparsers.add_parser('generate',  help='generate integrity files')
     parser_generate.add_argument('directory', nargs='?', default=".", help='directory to generate (defaults to current dir)')
     parser_generate.add_argument('-r', '--recursive', action='store_true', help='recurse into subdirectories')
-    parser_generate.add_argument('-l', '--follow-links', action='store_true', dest='follow_links', help='follow symbolic links')
+    parser_generate.add_argument('-l', '--follow-links', action='store_true', help='follow symboly links')
 
-    # Update subcommand
-    parser_update = subparsers.add_parser('update', help='update integrity files')
-    parser_update.add_argument('directory', nargs='?', default=".", help='directory to update (defaults to current dir)')
+    parser_update = subparsers.add_parser('update',  help='update integrity files')
+    parser_update.add_argument('directory', nargs='?', default=".", help='directory to generate (defaults to current dir)')
     parser_update.add_argument('-r', '--recursive', action='store_true', help='recurse into subdirectories')
-    parser_update.add_argument('-l', '--follow-links', action='store_true', dest='follow_links', help='follow symbolic links')
+    parser_update.add_argument('-l', '--follow-links', action='store_true', help='follow symboly links')
     parser_update.add_argument('-a', '--check-atime', action='store_true', help='check access time')
     parser_update.add_argument('-c', '--check-ctime', action='store_true', help='check creation time')
     parser_update.add_argument('-M', '--ignore-mtime', action='store_true', help='ignore modification time')
     parser_update.add_argument('-S', '--ignore-size', action='store_true', help='ignore size')
 
-    # Check subcommand
     parser_check = subparsers.add_parser('check', help='check integrity of files')
     parser_check.add_argument('directory', nargs='?', default=".", help='directory to check (defaults to current dir)')
     parser_check.add_argument('-r', '--recursive', action='store_true', help='recurse into subdirectories')
-    parser_check.add_argument('-l', '--follow-links', action='store_true', dest='follow_links', help='follow symbolic links')
+    parser_check.add_argument('-l', '--follow-links', action='store_true', help='follow symboly links')
     parser_check.add_argument('-s', '--show-same-files', action='store_true', help='show files that are the same')
     parser_check.add_argument('-a', '--check-atime', action='store_true', help='check access time')
     #parser_check.add_argument('-A', '--ignore-atime', action='store_true', help='ignore access time')
@@ -308,25 +315,7 @@ if __name__ == '__main__':
     parser_check.add_argument('-S', '--ignore-size', action='store_true', help='ignore size')
     parser_check.add_argument('-H', '--ignore-hash', action='store_true', help='ignore hash (contents)')
 
-    args = parser.parse_args()
-    options = vars(args)
-    
-    # Set default values for options that might not be present in all subcommands
-    for opt in ['recursive', 'follow_links', 'check_atime', 'check_ctime', 
-                'ignore_mtime', 'ignore_size', 'show_same_files', 'ignore_hash']:
-        options.setdefault(opt, False)
-    
-    if args.command is None:
-        parser.print_help()
-    else:
-        try:
-            globals()[args.command](options["directory"])
-        except KeyboardInterrupt:
-            print("\nOperation cancelled by user")
-            sys.exit(1)
-        except Exception as e:
-            error(f"Error: {e}")
-            if options.get('verbose'):
-                import traceback
-                traceback.print_exc()
-            sys.exit(1)
+    options = vars(parser.parse_args())
+    globals()[options.pop('command')](options["directory"])
+
+
