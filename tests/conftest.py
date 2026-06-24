@@ -9,6 +9,10 @@ from filecheck import Options
 def reset_globals():
     filecheck.options = Options()
     filecheck.check_exit_code = 0
+    filecheck.check_added = 0
+    filecheck.check_deleted = 0
+    filecheck.check_modified = 0
+    filecheck.check_same = 0
 
 
 def make_info(file_name, hash_val="abc123", size=100,

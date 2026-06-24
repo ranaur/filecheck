@@ -1,0 +1,158 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.0.3, pluggy-1.6.0
+rootdir: /mnt/c/Trove/my-git/filecheck
+plugins: anyio-4.13.0
+collected 137 items
+
+tests/test_check.py .......................                              [ 16%]
+tests/test_cli.py ..............                                         [ 27%]
+tests/test_commands.py ........                                          [ 32%]
+tests/test_core.py ..................................................... [ 71%]
+....F..                                                                  [ 76%]
+tests/test_update.py ............                                        [ 85%]
+tests/test_walk.py .......FFF......F...                                  [100%]
+
+=================================== FAILURES ===================================
+_________________ TestMakeInfo.test_stat_failure_returns_none __________________
+
+self = <tests.test_core.TestMakeInfo object at 0x7b40bcaf9590>
+tmp_path = PosixPath('/tmp/pytest-of-ranaur/pytest-7/test_stat_failure_returns_none0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7b40bc8b9710>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7b40bc8b9b90>
+
+>   ???
+
+/mnt/c/Trove/my-git/filecheck/tests/test_core.py:412: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/mnt/c/Trove/my-git/filecheck/filecheck.py:326: in makeInfo
+    if path.is_dir():
+       ^^^^^^^^^^^^^
+/home/ranaur/.pyenv/versions/3.11.15/lib/python3.11/pathlib.py:1250: in is_dir
+    return S_ISDIR(self.stat().st_mode)
+                   ^^^^^^^^^^^
+/home/ranaur/.pyenv/versions/3.11.15/lib/python3.11/pathlib.py:1013: in stat
+    return os.stat(self, follow_symlinks=follow_symlinks)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+_ = (PosixPath('/tmp/pytest-of-ranaur/pytest-7/test_stat_failure_returns_none0/f.txt'),)
+__ = {'follow_symlinks': True}
+
+>   ???
+E   OSError: stat failed
+
+/mnt/c/Trove/my-git/filecheck/tests/test_core.py:410: OSError
+_______________________ TestWalkTree.test_lstat_failure ________________________
+
+self = <tests.test_walk.TestWalkTree object at 0x7b40bc82de50>
+tmp_path = PosixPath('/tmp/pytest-of-ranaur/pytest-7/test_lstat_failure0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7b40bc867510>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7b40bc866f10>
+
+    def test_lstat_failure(self, tmp_path, capsys, monkeypatch):
+        (tmp_path / "good.txt").write_text("ok")
+        (tmp_path / "bad.txt").write_text("secret")
+        bad_path = str(tmp_path / "bad.txt")
+        original_lstat = os.lstat
+        def mock_lstat(path):
+            if str(path) == bad_path:
+                raise PermissionError(f"cannot stat {path}")
+            return original_lstat(path)
+        monkeypatch.setattr(os, 'lstat', mock_lstat)
+        results = self.collect(tmp_path)
+        assert "good.txt" in results
+        captured = capsys.readouterr()
+>       assert "cannot stat" in captured.out
+E       AssertionError: assert 'cannot stat' in ''
+E        +  where '' = CaptureResult(out='', err='').out
+
+tests/test_walk.py:95: AssertionError
+_____________ TestWalkTree.test_symlink_skipped_when_follow_false ______________
+
+self = <tests.test_walk.TestWalkTree object at 0x7b40bc82e510>
+tmp_path = PosixPath('/tmp/pytest-of-ranaur/pytest-7/test_symlink_skipped_when_foll0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7b40b7784810>
+
+    def test_symlink_skipped_when_follow_false(self, tmp_path, monkeypatch):
+        """Symlink is skipped when followLink=False (mock os.lstat)."""
+        (tmp_path / "target.txt").write_text("real")
+        link_path = str(tmp_path / "link.txt")
+        (tmp_path / "link.txt").write_text("dummy")
+        original_lstat = os.lstat
+        def mock_lstat(path):
+            if str(path) == link_path:
+                class MockStat:
+                    st_mode = stat.S_IFLNK | 0o777
+                return MockStat()
+            return original_lstat(path)
+        monkeypatch.setattr(os, 'lstat', mock_lstat)
+        results = self.collect(tmp_path, follow_links=False)
+        assert "target.txt" in results
+>       assert "link.txt" not in results
+E       AssertionError: assert 'link.txt' not in ['target.txt', 'link.txt']
+
+tests/test_walk.py:114: AssertionError
+_________ TestWalkTree.test_symlink_with_follow_true_falls_to_unknown __________
+
+self = <tests.test_walk.TestWalkTree object at 0x7b40bc82eb90>
+tmp_path = PosixPath('/tmp/pytest-of-ranaur/pytest-7/test_symlink_with_follow_true_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7b40b77741d0>
+capsys = <_pytest.capture.CaptureFixture object at 0x7b40b7774d10>
+
+    def test_symlink_with_follow_true_falls_to_unknown(self, tmp_path, monkeypatch, capsys):
+        """--follow-links has no effect: lstat still shows symlink, ends as 'Skipping'."""
+        (tmp_path / "target.txt").write_text("real")
+        link_path = str(tmp_path / "link.txt")
+        (tmp_path / "link.txt").write_text("dummy")
+        original_lstat = os.lstat
+        def mock_lstat(path):
+            if str(path) == link_path:
+                class MockStat:
+                    st_mode = stat.S_IFLNK | 0o777
+                return MockStat()
+            return original_lstat(path)
+        monkeypatch.setattr(os, 'lstat', mock_lstat)
+        results = self.collect(tmp_path, follow_links=True)
+        assert "target.txt" in results
+        captured = capsys.readouterr()
+>       assert "Skipping" in captured.out
+E       AssertionError: assert 'Skipping' in ''
+E        +  where '' = CaptureResult(out='', err='').out
+
+tests/test_walk.py:132: AssertionError
+_____________________ TestWalkTree.test_unknown_file_type ______________________
+
+self = <tests.test_walk.TestWalkTree object at 0x7b40bc82d910>
+tmp_path = PosixPath('/tmp/pytest-of-ranaur/pytest-7/test_unknown_file_type0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7b40b7799350>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7b40b7798d10>
+
+    def test_unknown_file_type(self, tmp_path, capsys, monkeypatch):
+        """Non-dir, non-reg, non-symlink entries are printed as Skipping."""
+        (tmp_path / "regular.txt").write_text("hello")
+        special_path = tmp_path / "special_device"
+        special_path.write_text("")  # create it so listdir finds it
+        special = str(special_path)
+        original_lstat = os.lstat
+        def mock_lstat(path):
+            if str(path) == special:
+                class MockStat:
+                    st_mode = stat.S_IFIFO | 0o644
+                return MockStat()
+            return original_lstat(path)
+        monkeypatch.setattr(os, 'lstat', mock_lstat)
+        results = self.collect(tmp_path)
+        assert "regular.txt" in results
+        captured = capsys.readouterr()
+>       assert "Skipping" in captured.out
+E       AssertionError: assert 'Skipping' in ''
+E        +  where '' = CaptureResult(out='', err='').out
+
+tests/test_walk.py:198: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_core.py::TestMakeInfo::test_stat_failure_returns_none - OSE...
+FAILED tests/test_walk.py::TestWalkTree::test_lstat_failure - AssertionError:...
+FAILED tests/test_walk.py::TestWalkTree::test_symlink_skipped_when_follow_false
+FAILED tests/test_walk.py::TestWalkTree::test_symlink_with_follow_true_falls_to_unknown
+FAILED tests/test_walk.py::TestWalkTree::test_unknown_file_type - AssertionEr...
+======================== 5 failed, 132 passed in 0.49s =========================

@@ -8,16 +8,30 @@ import hashlib
 from fnmatch import fnmatch
 from dataclasses import dataclass, field
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, Any
 
-version = "0.1"
-signature = "\xe2\x9f\xb9"
-endline = "\n"
+version: str = "0.2"
+signature: str = "ascii"
+endline: str = "\n"
 
-filecheckName = ".filecheck"
-filecheckTempName = ".filecheck.tmp"
-ignoreFiles = [filecheckName, filecheckTempName, ".git", "._Icon*", "Icon*", ".DS_Store"]
+filecheckName: str = ".filecheck"
+filecheckTempName: str = ".filecheck.tmp"
+_IGNORE_EXACT: list[str] = [filecheckName, filecheckTempName, ".git", ".DS_Store"]
+_IGNORE_GLOB: list[str] = ["._Icon*", "Icon*"]
 
-check_exit_code = 0
+check_exit_code: int = 0
+check_added: int = 0
+check_deleted: int = 0
+check_modified: int = 0
+check_same: int = 0
+
+_SUPPORTED_VERSIONS: tuple[str, ...] = ("0.1", "0.2")
+_SUPPORTED_SIGS: tuple[str, ...] = ("\u27f9", "ascii")
+_ALGORITHMS: dict[str, Callable[[], Any]] = {
+    "md5": hashlib.md5,
+    "sha256": hashlib.sha256,
+}
 
 
 @dataclass
@@ -31,43 +45,70 @@ class Options:
     ignore_size: bool = False
     show_same_files: bool = False
     ignore_hash: bool = False
-    exclude: list = field(default_factory=list)
-    include: list = field(default_factory=list)
+    quiet: bool = False
+    algorithm: str = "md5"
+    exclude: list[str] = field(default_factory=list)
+    include: list[str] = field(default_factory=list)
 
 
-options = Options()
+options: Options = Options()
 
 
-def error(message):
+def error(message: str) -> None:
     print(f"ERROR: {message}")
 
 
-def md5(fileName):
-    hash_md5 = hashlib.md5()
+def _compute_hash(fileName: str, algorithm: str | None = None) -> str:
+    algo = algorithm or options.algorithm
+    if algo not in _ALGORITHMS:
+        algo = "md5"
     try:
+        h = _ALGORITHMS[algo]()
         with open(fileName, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
-                hash_md5.update(chunk)
-        return hash_md5.hexdigest()
-    except Exception as e:
-        print(f"Error calculating MD5 for {fileName}: {e}")
+                h.update(chunk)
+        return h.hexdigest()
+    except (OSError, PermissionError, FileNotFoundError) as e:
+        print(f"Error calculating {algo} for {fileName}: {e}")
         return "error"
 
 
-def shouldIgnore(filename):
-    name = Path(filename).name
+def _compute_hash_batch(files_dict: dict[str, dict[str, Any]]) -> None:
+    paths: list[str] = []
+    keys: list[str] = []
+    for key, info in files_dict.items():
+        if info["hash"] == "" and info["hash"] != "<DIR>":
+            paths.append(os.path.join(info["dirName"], info["fileName"]))
+            keys.append(key)
+    if not paths:
+        return
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        fut_to_key = {executor.submit(_compute_hash, p): k for p, k in zip(paths, keys)}
+        for fut in as_completed(fut_to_key):
+            key = fut_to_key[fut]
+            try:
+                files_dict[key]["hash"] = fut.result()
+            except Exception:
+                files_dict[key]["hash"] = "error"
 
-    include_patterns = options.include
+
+def shouldIgnore(filename: str) -> bool:
+    name: str = Path(filename).name
+
+    include_patterns: list[str] = options.include
     if include_patterns:
         for pattern in include_patterns:
             if fnmatch(name, pattern) or fnmatch(filename, pattern):
                 return False
 
-    for pattern in ignoreFiles:
+    if name in _IGNORE_EXACT:
+        return True
+
+    for pattern in _IGNORE_GLOB:
         if fnmatch(name, pattern):
             return True
 
-    exclude_patterns = options.exclude
+    exclude_patterns: list[str] = options.exclude
     for pattern in exclude_patterns:
         if fnmatch(name, pattern) or fnmatch(filename, pattern):
             return True
@@ -75,25 +116,35 @@ def shouldIgnore(filename):
     return False
 
 
-def walkTree(top, callback, recursive, followLink, data, beginDirCallback=False, endDirCallback=False):
-    top_path = Path(top)
-    stack = [(top_path, data)]
+def walkTree(
+    top: str,
+    callback: Callable[[str, Any], None],
+    recursive: bool,
+    followLink: bool,
+    data: Any,
+    beginDirCallback: Callable[[str], Any] | bool = False,
+    endDirCallback: Callable[[str, Any], None] | bool = False,
+) -> None:
+    top_path: Path = Path(top)
+    stack: list[tuple[Path, Any]] = [(top_path, data)]
     while stack:
+        dirPath: Path
+        inheritedData: Any
         dirPath, inheritedData = stack.pop()
         if callable(beginDirCallback):
-            dirData = beginDirCallback(str(dirPath))
+            dirData: Any = beginDirCallback(str(dirPath))
         else:
             dirData = inheritedData
         try:
-            entries = list(dirPath.iterdir())
-        except Exception:
+            entries: list[Path] = list(dirPath.iterdir())
+        except (OSError, PermissionError):
             entries = []
         for entry in entries:
             if not shouldIgnore(entry.name):
                 try:
-                    st = entry.lstat()
-                    mode = st.st_mode
-                except Exception as e:
+                    st: os.stat_result = entry.lstat()
+                    mode: int = st.st_mode
+                except (OSError, PermissionError) as e:
                     print(f"cannot stat {entry}: {e}")
                     continue
 
@@ -112,37 +163,38 @@ def walkTree(top, callback, recursive, followLink, data, beginDirCallback=False,
             endDirCallback(str(dirPath), dirData)
 
 
-def filecheckNew(dirName):
-    data = {}
+def filecheckNew(dirName: str) -> dict[str, Any]:
+    data: dict[str, Any] = {}
     data["dirName"] = dirName
     data["files"] = {}
     return data
 
 
-def filecheckSet(data, info):
+def filecheckSet(data: dict[str, Any], info: dict[str, Any]) -> None:
     data["files"][info["fileName"]] = info
 
 
-def filecheckSave(data, dirName):
+def filecheckSave(data: dict[str, Any], dirName: str) -> None:
     dirName = data["dirName"]
-    dbFile = Path(dirName) / filecheckName
-    tmpFile = Path(dirName) / filecheckTempName
+    dbFile: Path = Path(dirName) / filecheckName
+    tmpFile: Path = Path(dirName) / filecheckTempName
     try:
         with open(tmpFile, "w", encoding='utf-8') as f:
-            f.write(f"\ufeffFILECHECK:{version}:{signature}{endline}")
+            f.write(f"FILECHECK:{version}:{signature}:{options.algorithm}{endline}")
             for fn, info in data["files"].items():
-                line = f"{info['hash']}:{info['size']}:{info['ctime']:.10f}:{info['mtime']:.10f}:{info['atime']:.10f}:{info['fileName']}{endline}"
+                line: str = f"{info['hash']}:{info['size']}:{info['ctime']:.10f}:{info['mtime']:.10f}:{info['atime']:.10f}:{info['fileName']}{endline}"
                 f.write(line)
         os.replace(str(tmpFile), str(dbFile))
-    except Exception as e:
+    except (OSError, PermissionError) as e:
         error(f"cannot save info for dir {dirName}: {e}")
         traceback.print_exc()
 
 
-def filecheckLoad(dirName):
-    fileName = Path(dirName) / filecheckName
-    res = filecheckNew(dirName)
-    header = False
+def filecheckLoad(dirName: str) -> dict[str, Any] | bool:
+    fileName: Path = Path(dirName) / filecheckName
+    res: dict[str, Any] = filecheckNew(dirName)
+    res["algorithm"] = options.algorithm
+    header: bool = False
     if not fileName.is_file():
         return res
 
@@ -150,18 +202,22 @@ def filecheckLoad(dirName):
         for line in f:
             line = line.rstrip("\r\n")
             if not header:
-                headerFields = line.split(":")
-                if len(headerFields) < 3 or \
-                   headerFields[0] != "\ufeffFILECHECK" or \
-                   headerFields[1] != version or \
-                   headerFields[2] != signature:
+                headerFields: list[str] = line.split(":")
+                if len(headerFields) < 3:
                     error("Invalid header")
                     return False
+                h0: str = headerFields[0].lstrip("\ufeff")
+                h1: str = headerFields[1]
+                h2: str = headerFields[2]
+                if h0 != "FILECHECK" or h1 not in _SUPPORTED_VERSIONS or h2 not in _SUPPORTED_SIGS:
+                    error("Invalid header")
+                    return False
+                res["algorithm"] = headerFields[3].strip() if len(headerFields) > 3 else "md5"
                 header = True
             else:
-                lineFields = line.split(":", 5)
+                lineFields: list[str] = line.split(":", 5)
                 if len(lineFields) >= 6:
-                    data = {
+                    data: dict[str, Any] = {
                         'dirName': str(fileName.parent),
                         'fileName': lineFields[5],
                         'hash': lineFields[0],
@@ -174,25 +230,26 @@ def filecheckLoad(dirName):
     return res
 
 
-def checkBegin(dirName):
+def checkBegin(dirName: str) -> dict[str, Any]:
     if options.verbose:
         print(dirName)
     return generateBegin(dirName)
 
 
-def checkFile(fileName, data):
+def checkFile(fileName: str, data: dict[str, Any]) -> None:
     generateFileWithoutHash(fileName, data)
 
 
-def compareData(current, saved, dirName):
-    global check_exit_code
-    showSameFile = options.show_same_files
+def compareData(current: dict[str, Any], saved: dict[str, Any], dirName: str) -> None:
+    global check_exit_code, check_added, check_deleted, check_modified, check_same
+    showSameFile: bool = options.show_same_files
     for key, currentValue in current["files"].items():
-        status = "pending"
+        status: str = "pending"
         if key not in saved["files"]:
             status = "new item"
+            check_added += 1
         else:
-            savedValue = saved["files"][key]
+            savedValue: dict[str, Any] = saved["files"][key]
             if currentValue["hash"] == "<DIR>" or savedValue["hash"] == "<DIR>":
                 if currentValue["hash"] != savedValue["hash"]:
                     status = "directory mismatch"
@@ -208,7 +265,11 @@ def compareData(current, saved, dirName):
                 status = "ctime mismatch"
             else:
                 if not options.ignore_hash and currentValue["hash"] == "" and savedValue["hash"] != "":
-                    currentValue["hash"] = md5(os.path.join(currentValue["dirName"], currentValue["fileName"]))
+                    saved_algo: str = saved.get("algorithm", "md5")
+                    currentValue["hash"] = _compute_hash(
+                        os.path.join(currentValue["dirName"], currentValue["fileName"]),
+                        saved_algo
+                    )
 
                 if not options.ignore_hash and savedValue["hash"] != currentValue["hash"]:
                     status = "MD5 mismatch"
@@ -217,55 +278,60 @@ def compareData(current, saved, dirName):
             del saved["files"][key]
         if showSameFile or status != "same file":
             print(f"{status}: {os.path.join(dirName, key)}")
-        if status not in ("same file", "pending"):
+        if status in ("same file", "pending"):
+            check_same += 1
+        else:
+            check_modified += 1
             check_exit_code += 1
     for key, savedValue in saved["files"].items():
         if not shouldIgnore(key):
             print(f"deleted file: {os.path.join(dirName, key)}")
             check_exit_code += 1
+            check_deleted += 1
 
 
-def checkEnd(dirName, data):
-    savedData = filecheckLoad(dirName)
+def checkEnd(dirName: str, data: dict[str, Any]) -> None:
+    savedData: dict[str, Any] | bool = filecheckLoad(dirName)
     compareData(data, savedData, dirName)
 
 
-def generateBegin(dirName):
+def generateBegin(dirName: str) -> dict[str, Any]:
     if options.verbose:
         print(dirName)
     return filecheckNew(dirName)
 
 
-def generateEnd(dirName, data):
+def generateEnd(dirName: str, data: dict[str, Any]) -> None:
+    _compute_hash_batch(data["files"])
     filecheckSave(data, dirName)
 
 
-def generateFileWithoutHash(fileName, data):
+def generateFileWithoutHash(fileName: str, data: dict[str, Any]) -> None:
     _generateFile(fileName, data, False)
 
 
-def generateFile(fileName, data):
-    _generateFile(fileName, data, md5)
+def generateFile(fileName: str, data: dict[str, Any]) -> None:
+    _generateFile(fileName, data, _compute_hash)
 
 
-def _generateFile(fileName, data, hashFunc):
+def _generateFile(fileName: str, data: dict[str, Any], hashFunc: Callable[[str], str] | bool) -> None:
     try:
         if not shouldIgnore(fileName):
             filecheckSet(data, makeInfo(fileName, hashFunc))
-    except Exception as e:
+    except (OSError, PermissionError, FileNotFoundError) as e:
         error(f"cannot generate info for file {fileName}: {e}")
 
 
-def makeInfo(fileName, hashFunc=False):
-    path = Path(fileName)
+def makeInfo(fileName: str, hashFunc: Callable[[str], str] | bool = False) -> dict[str, Any] | None:
+    path: Path = Path(fileName)
     if path.is_dir():
-        hash_val = "<DIR>"
+        hash_val: str = "<DIR>"
     else:
         hash_val = hashFunc(fileName) if callable(hashFunc) else ""
 
     try:
-        stat_info = path.stat()
-        info = {
+        stat_info: os.stat_result = path.stat()
+        info: dict[str, Any] = {
             'dirName': str(path.parent),
             'fileName': path.name,
             'hash': hash_val,
@@ -275,28 +341,28 @@ def makeInfo(fileName, hashFunc=False):
             'atime': stat_info.st_atime
         }
         return info
-    except Exception as e:
+    except (OSError, PermissionError, FileNotFoundError) as e:
         error(f"Error getting file info for {fileName}: {e}")
         return None
 
 
-def updateBegin(dirName):
+def updateBegin(dirName: str) -> dict[str, Any]:
     if options.verbose:
         print(dirName)
-    updateData = {}
+    updateData: dict[str, Any] = {}
     updateData["old"] = filecheckLoad(dirName)
     updateData["new"] = filecheckNew(dirName)
     return updateData
 
 
-def updateFile(fileName, data):
+def updateFile(fileName: str, data: dict[str, Any]) -> None:
     generateFileWithoutHash(fileName, data["new"])
-    baseName = Path(fileName).name
-    newInfo = data["new"]["files"][baseName]
+    baseName: str = Path(fileName).name
+    newInfo: dict[str, Any] = data["new"]["files"][baseName]
 
     if baseName in data["old"]["files"]:
-        oldInfo = data["old"]["files"][baseName]
-        changed = False
+        oldInfo: dict[str, Any] = data["old"]["files"][baseName]
+        changed: bool = False
         if not options.ignore_size and newInfo["size"] != oldInfo["size"]:
             print("reason: size")
             changed = True
@@ -318,32 +384,42 @@ def updateFile(fileName, data):
         data["new"]["files"][baseName]["hash"] = oldInfo["hash"]
 
 
-def updateEnd(dirName, data):
+def updateEnd(dirName: str, data: dict[str, Any]) -> None:
+    _compute_hash_batch(data["new"]["files"])
     filecheckSave(data["new"], dirName)
 
 
-def generate(directory):
+def generate(directory: str) -> None:
     print(f"GENERATE: {directory}")
-    walkTree(directory, generateFile, options.recursive, options.follow_links, {}, generateBegin, generateEnd)
+    walkTree(directory, generateFileWithoutHash, options.recursive, options.follow_links, {}, generateBegin, generateEnd)
 
 
-def update(directory):
+def update(directory: str) -> None:
     print(f"UPDATE: {directory}")
     walkTree(directory, updateFile, options.recursive, options.follow_links, {}, updateBegin, updateEnd)
 
 
-def check(directory):
-    global check_exit_code
+def check(directory: str) -> int:
+    global check_exit_code, check_added, check_deleted, check_modified, check_same
     check_exit_code = 0
+    check_added = 0
+    check_deleted = 0
+    check_modified = 0
+    check_same = 0
     print(f"CHECK: {directory}")
     walkTree(directory, checkFile, options.recursive, options.follow_links, {}, checkBegin, checkEnd)
+    if not options.quiet:
+        total: int = check_added + check_deleted + check_modified + check_same
+        print(f"Total: {total}  Added: {check_added}  Deleted: {check_deleted}  Modified: {check_modified}  Same: {check_same}")
     return check_exit_code
 
 
-def _build_shared_parent():
-    parent = argparse.ArgumentParser(add_help=False)
+def _build_shared_parent() -> argparse.ArgumentParser:
+    parent: argparse.ArgumentParser = argparse.ArgumentParser(add_help=False)
     parent.add_argument('-r', '--recursive', action='store_true', help='recurse into subdirectories')
     parent.add_argument('-l', '--follow-links', action='store_true', dest='follow_links', help='follow symbolic links')
+    parent.add_argument('-A', '--algorithm', choices=list(_ALGORITHMS.keys()), default="md5",
+                        help='hash algorithm (default: md5)')
     parent.add_argument('-a', '--check-atime', action='store_true', help='check access time')
     parent.add_argument('-c', '--check-ctime', action='store_true', help='check creation time')
     parent.add_argument('-M', '--ignore-mtime', action='store_true', help='ignore modification time')
@@ -355,12 +431,12 @@ def _build_shared_parent():
     return parent
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description='Check file integrity')
+def main(argv: list[str] | None = None) -> None:
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(description='Check file integrity')
     parser.add_argument('-v', '--verbose', action='store_true', help='display more info')
     subparsers = parser.add_subparsers(dest="command", help='command to execute')
 
-    shared = _build_shared_parent()
+    shared: argparse.ArgumentParser = _build_shared_parent()
 
     parser_generate = subparsers.add_parser('generate', parents=[shared], help='generate integrity files',
                                             conflict_handler='resolve')
@@ -375,6 +451,7 @@ def main(argv=None):
     parser_check.add_argument('directory', nargs='?', default=".", help='directory to check (defaults to current dir)')
     parser_check.add_argument('-s', '--show-same-files', action='store_true', help='show files that are the same')
     parser_check.add_argument('-H', '--ignore-hash', action='store_true', help='ignore hash (contents)')
+    parser_check.add_argument('-q', '--quiet', action='store_true', help='suppress summary output')
 
     args = parser.parse_args(argv)
     global options
@@ -386,8 +463,8 @@ def main(argv=None):
         parser.print_help()
     else:
         try:
-            directory = args.directory if hasattr(args, 'directory') else "."
-            ret = globals()[args.command](directory)
+            directory: str = args.directory if hasattr(args, 'directory') else "."
+            ret: Any = globals()[args.command](directory)
             if isinstance(ret, int):
                 sys.exit(ret)
         except KeyboardInterrupt:
@@ -399,6 +476,8 @@ def main(argv=None):
                 import traceback
                 traceback.print_exc()
             sys.exit(1)
+
+    sys.exit(0)
 
 
 if __name__ == '__main__':

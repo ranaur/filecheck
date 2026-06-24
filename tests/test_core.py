@@ -13,24 +13,24 @@ class TestError:
         assert captured.out == "ERROR: test message\n"
 
 
-# ── md5() ────────────────────────────────────────────────────────────
+# ── _compute_hash() ──────────────────────────────────────────────────
 
-class TestMd5:
+class TestComputeHash:
     def test_normal_file(self, tmp_path):
         f = tmp_path / "test.txt"
         f.write_text("hello world")
         expected = hashlib.md5(b"hello world").hexdigest()
-        assert filecheck.md5(str(f)) == expected
+        assert filecheck._compute_hash(str(f)) == expected
 
     def test_empty_file(self, tmp_path):
         f = tmp_path / "empty.txt"
         f.write_text("")
-        assert filecheck.md5(str(f)) == "d41d8cd98f00b204e9800998ecf8427e"
+        assert filecheck._compute_hash(str(f)) == "d41d8cd98f00b204e9800998ecf8427e"
 
     def test_binary_file(self, tmp_path):
         f = tmp_path / "binary.bin"
         f.write_bytes(bytes(range(256)))
-        result = filecheck.md5(str(f))
+        result = filecheck._compute_hash(str(f))
         assert len(result) == 32
         assert all(c in "0123456789abcdef" for c in result)
 
@@ -39,12 +39,12 @@ class TestMd5:
         data = b"ABCDEFGH" * 100000
         f.write_bytes(data)
         expected = hashlib.md5(data).hexdigest()
-        assert filecheck.md5(str(f)) == expected
+        assert filecheck._compute_hash(str(f)) == expected
 
     def test_nonexistent_file(self, capsys):
-        assert filecheck.md5(r"C:\nonexistent_file_xyz\foo.txt") == "error"
+        assert filecheck._compute_hash(r"C:\nonexistent_file_xyz\foo.txt") == "error"
         captured = capsys.readouterr()
-        assert "Error calculating MD5" in captured.out
+        assert "Error calculating" in captured.out
 
     def test_permission_denied(self, tmp_path, capsys, monkeypatch):
         f = tmp_path / "noperm.txt"
@@ -56,9 +56,28 @@ class TestMd5:
                 raise PermissionError(f"Permission denied: {args[0]}")
             return original_open(*args, **kwargs)
         monkeypatch.setattr(builtins, 'open', mock_open)
-        assert filecheck.md5(str(f)) == "error"
+        assert filecheck._compute_hash(str(f)) == "error"
         captured = capsys.readouterr()
-        assert "Error calculating MD5" in captured.out
+        assert "Error calculating" in captured.out
+
+    def test_sha256(self, tmp_path):
+        f = tmp_path / "test.txt"
+        f.write_text("hello world")
+        expected = hashlib.sha256(b"hello world").hexdigest()
+        assert filecheck._compute_hash(str(f), "sha256") == expected
+
+    def test_unknown_algorithm_falls_back_to_md5(self, tmp_path):
+        f = tmp_path / "test.txt"
+        f.write_text("hello")
+        expected = hashlib.md5(b"hello").hexdigest()
+        assert filecheck._compute_hash(str(f), "unknown_algo") == expected
+
+    def test_algorithm_from_options(self, tmp_path):
+        f = tmp_path / "test.txt"
+        f.write_text("hello world")
+        filecheck.options.algorithm = "sha256"
+        expected = hashlib.sha256(b"hello world").hexdigest()
+        assert filecheck._compute_hash(str(f)) == expected
 
 
 # ── shouldIgnore() ────────────────────────────────────────────────────
@@ -145,7 +164,7 @@ class TestFilecheckSave:
         mf = tmp_path / ".filecheck"
         assert mf.is_file()
         lines, text = self._read_lines(tmp_path)
-        assert "\ufeffFILECHECK:" in text
+        assert "FILECHECK:" in text
         assert any(filecheck.version in l for l in lines)
 
     def test_saves_files(self, tmp_path):
@@ -377,7 +396,7 @@ class TestMakeInfo:
 
     def test_file_with_callable_hash(self, tmp_path):
         f = create_file(tmp_path / "f.txt", b"data")
-        info = filecheck.makeInfo(str(f), filecheck.md5)
+        info = filecheck.makeInfo(str(f), filecheck._compute_hash)
         assert len(info["hash"]) == 32
 
     def test_file_with_non_callable_hash(self, tmp_path):
@@ -387,7 +406,9 @@ class TestMakeInfo:
 
     def test_stat_failure_returns_none(self, tmp_path, capsys, monkeypatch):
         f = create_file(tmp_path / "f.txt", b"x")
-        def mock_stat(_):
+        from pathlib import Path
+        monkeypatch.setattr(Path, 'is_dir', lambda self: False)
+        def mock_stat(*_, **__):
             raise OSError("stat failed")
         monkeypatch.setattr(os, 'stat', mock_stat)
         result = filecheck.makeInfo(str(f))

@@ -2,6 +2,7 @@ import pytest
 import filecheck
 import os
 import stat
+from pathlib import Path
 
 
 class TestWalkTree:
@@ -83,12 +84,12 @@ class TestWalkTree:
         (tmp_path / "good.txt").write_text("ok")
         (tmp_path / "bad.txt").write_text("secret")
         bad_path = str(tmp_path / "bad.txt")
-        original_lstat = os.lstat
-        def mock_lstat(path):
-            if str(path) == bad_path:
-                raise PermissionError(f"cannot stat {path}")
-            return original_lstat(path)
-        monkeypatch.setattr(os, 'lstat', mock_lstat)
+        original_lstat = Path.lstat
+        def mock_lstat(self):
+            if str(self) == bad_path:
+                raise PermissionError(f"cannot stat {self}")
+            return original_lstat(self)
+        monkeypatch.setattr(Path, 'lstat', mock_lstat)
         results = self.collect(tmp_path)
         assert "good.txt" in results
         captured = capsys.readouterr()
@@ -97,18 +98,18 @@ class TestWalkTree:
     # ── Symlinks (mocked — avoids platform dependency) ──────────────
 
     def test_symlink_skipped_when_follow_false(self, tmp_path, monkeypatch):
-        """Symlink is skipped when followLink=False (mock os.lstat)."""
+        """Symlink is skipped when followLink=False (mock Path.lstat)."""
         (tmp_path / "target.txt").write_text("real")
         link_path = str(tmp_path / "link.txt")
         (tmp_path / "link.txt").write_text("dummy")
-        original_lstat = os.lstat
-        def mock_lstat(path):
-            if str(path) == link_path:
+        original_lstat = Path.lstat
+        def mock_lstat(self):
+            if str(self) == link_path:
                 class MockStat:
                     st_mode = stat.S_IFLNK | 0o777
                 return MockStat()
-            return original_lstat(path)
-        monkeypatch.setattr(os, 'lstat', mock_lstat)
+            return original_lstat(self)
+        monkeypatch.setattr(Path, 'lstat', mock_lstat)
         results = self.collect(tmp_path, follow_links=False)
         assert "target.txt" in results
         assert "link.txt" not in results
@@ -118,14 +119,14 @@ class TestWalkTree:
         (tmp_path / "target.txt").write_text("real")
         link_path = str(tmp_path / "link.txt")
         (tmp_path / "link.txt").write_text("dummy")
-        original_lstat = os.lstat
-        def mock_lstat(path):
-            if str(path) == link_path:
+        original_lstat = Path.lstat
+        def mock_lstat(self):
+            if str(self) == link_path:
                 class MockStat:
                     st_mode = stat.S_IFLNK | 0o777
                 return MockStat()
-            return original_lstat(path)
-        monkeypatch.setattr(os, 'lstat', mock_lstat)
+            return original_lstat(self)
+        monkeypatch.setattr(Path, 'lstat', mock_lstat)
         results = self.collect(tmp_path, follow_links=True)
         assert "target.txt" in results
         captured = capsys.readouterr()
@@ -184,14 +185,14 @@ class TestWalkTree:
         special_path = tmp_path / "special_device"
         special_path.write_text("")  # create it so listdir finds it
         special = str(special_path)
-        original_lstat = os.lstat
-        def mock_lstat(path):
-            if str(path) == special:
+        original_lstat = Path.lstat
+        def mock_lstat(self):
+            if str(self) == special:
                 class MockStat:
                     st_mode = stat.S_IFIFO | 0o644
                 return MockStat()
-            return original_lstat(path)
-        monkeypatch.setattr(os, 'lstat', mock_lstat)
+            return original_lstat(self)
+        monkeypatch.setattr(Path, 'lstat', mock_lstat)
         results = self.collect(tmp_path)
         assert "regular.txt" in results
         captured = capsys.readouterr()

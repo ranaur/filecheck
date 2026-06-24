@@ -1,6 +1,6 @@
 #!/bin/bash
 function fc() {
-	`dirname $0`/../filecheck.sh $*
+	`dirname $0`/../filecheck.sh -q $*
 }
 
 function assertFileMD5() {

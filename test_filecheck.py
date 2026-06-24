@@ -60,7 +60,7 @@ def test_generate_basic():
             lines = f.readlines()
         #print(lines)
         assert len(lines) >= 3, "Expected at least header + 2 entries"
-        assert lines[0].startswith('\ufeffFILECHECK'), "Invalid header"
+        assert lines[0].startswith('FILECHECK'), "Invalid header"
 
     finally:
         #o, e, r = run_command("ls -la", test_dir)
