@@ -1,0 +1,230 @@
+import pytest
+import filecheck
+import os
+from tests.conftest import make_info, make_manifest, create_file
+from pathlib import Path
+
+
+# ── checkBegin() ──────────────────────────────────────────────────────
+
+class TestCheckBegin:
+    def test_default(self):
+        filecheck.options['verbose'] = False
+        data = filecheck.checkBegin("/my/dir")
+        assert data["dirName"] == "/my/dir"
+
+    def test_verbose(self, capsys):
+        filecheck.options['verbose'] = True
+        data = filecheck.checkBegin("/my/dir")
+        assert data["dirName"] == "/my/dir"
+        captured = capsys.readouterr()
+        assert "/my/dir" in captured.out
+
+
+# ── checkFile() ───────────────────────────────────────────────────────
+
+class TestCheckFile:
+    def test_delegates_to_generate_without_hash(self, tmp_path, monkeypatch):
+        f = create_file(tmp_path / "f.txt", b"data")
+        data = filecheck.filecheckNew(str(tmp_path))
+        filecheck.checkFile(str(f), data)
+        assert "f.txt" in data["files"]
+        assert data["files"]["f.txt"]["hash"] == ""
+
+
+# ── compareData() ─────────────────────────────────────────────────────
+
+
+class TestCompareData:
+    def _run_compare(self, current, saved, dir_name):
+        import io, sys
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            filecheck.compareData(current, saved, dir_name)
+        finally:
+            sys.stdout = old
+        return buf.getvalue()
+
+    def _setup_outcome(self, curr_overrides, saved_overrides, dir_name=os.path.normpath("/test")):
+        base = make_info("f.txt")
+        cur = dict(base)
+        cur.update(curr_overrides or {})
+        sav = dict(base)
+        sav.update(saved_overrides or {})
+        current = make_manifest([cur], dir_name=dir_name)
+        saved = make_manifest([sav], dir_name=dir_name)
+        return current, saved
+
+    @pytest.mark.parametrize(
+        ("name", "opts", "curr_overrides", "saved_overrides", "expected"),
+        [
+            ("dir_match",    {}, {"hash": "<DIR>"}, {"hash": "<DIR>"}, "same file"),
+            ("dir_mismatch", {}, {"hash": "<DIR>"}, {"hash": "abc123"}, "directory mismatch"),
+            ("size_mismatch", {}, {"size": 200}, {"size": 100}, "size mismatch"),
+            ("mtime_mismatch", {}, {"mtime": 3000.5}, {"mtime": 2000.5}, "mtime mismatch"),
+            ("atime_mismatch", {"check_atime": True}, {"atime": 9999.0}, {"atime": 3000.0}, "atime mismatch"),
+            ("ctime_mismatch", {"check_ctime": True}, {"ctime": 8888.0}, {"ctime": 1000.0}, "ctime mismatch"),
+            ("hash_mismatch",  {}, {"hash": "xxxx"}, {"hash": "yyyy"}, "MD5 mismatch"),
+            ("same_file",      {}, {"hash": "abc123"}, {"hash": "abc123"}, "same file"),
+            ("ignore_hash",    {"ignore_hash": True}, {"hash": "xxxx"}, {"hash": "yyyy"}, "same file"),
+            ("ignore_size",    {"ignore_size": True}, {"size": 999}, {"size": 100}, "same file"),
+            ("ignore_mtime",   {"ignore_mtime": True}, {"mtime": 9999.0}, {"mtime": 1000.0}, "same file"),
+        ],
+        ids=lambda p: p[0] if isinstance(p, tuple) else str(p)
+    )
+    def test_outcomes(self, name, opts, curr_overrides, saved_overrides, expected):
+        filecheck.options.update(opts)
+        filecheck.options['show_same_files'] = True
+        current, saved = self._setup_outcome(curr_overrides, saved_overrides)
+        output = self._run_compare(current, saved, os.path.normpath("/test"))
+        if expected == "same file":
+            assert f"same file: {os.path.normpath('/test')}{os.sep}f.txt" in output
+        else:
+            assert f"{expected}: {os.path.normpath('/test')}{os.sep}f.txt" in output
+
+    def test_new_item(self):
+        """File in current but not in saved -> new item."""
+        filecheck.options['show_same_files'] = False
+        cur = make_info("f.txt")
+        current = make_manifest([cur])
+        saved = make_manifest([])
+
+        import io, sys
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            filecheck.compareData(current, saved, os.path.normpath("/test"))
+        finally:
+            sys.stdout = old
+        output = buf.getvalue()
+        assert "new item" in output
+
+    def test_lazy_hash_computation(self, tmp_path):
+        """When current hash is empty and saved hash is not, compute MD5."""
+        f = create_file(tmp_path / "f.txt", b"actual content")
+        cur = make_info("f.txt", hash_val="", dir_name=str(tmp_path))
+        sav = make_info("f.txt", hash_val="abc123", dir_name=str(tmp_path))
+        current = make_manifest([cur], dir_name=str(tmp_path))
+        saved = make_manifest([sav], dir_name=str(tmp_path))
+        filecheck.options['show_same_files'] = True
+        filecheck.options['ignore_hash'] = False
+
+        import io, sys
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            filecheck.compareData(current, saved, str(tmp_path))
+        finally:
+            sys.stdout = old
+        output = buf.getvalue()
+
+        assert "MD5 mismatch" in output or "same file" in output
+        new_hash = current["files"]["f.txt"]["hash"]
+        assert len(new_hash) == 32
+        assert new_hash != ""
+
+    def test_lazy_hash_no_recompute_when_ignore_hash(self, tmp_path):
+        """With ignore_hash=True, lazy computation is skipped."""
+        f = create_file(tmp_path / "f.txt", b"content")
+        cur = make_info("f.txt", hash_val="", dir_name=str(tmp_path))
+        sav = make_info("f.txt", hash_val="abc123", dir_name=str(tmp_path))
+        current = make_manifest([cur], dir_name=str(tmp_path))
+        saved = make_manifest([sav], dir_name=str(tmp_path))
+        filecheck.options['show_same_files'] = True
+        filecheck.options['ignore_hash'] = True
+
+        import io, sys
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            filecheck.compareData(current, saved, str(tmp_path))
+        finally:
+            sys.stdout = old
+        output = buf.getvalue()
+        assert "same file" in output
+        assert current["files"]["f.txt"]["hash"] == ""
+
+    @pytest.mark.parametrize(
+        ("name", "show_same", "additional_current", "additional_saved", "expected_pattern"),
+        [
+            ("deleted_shown",             False, {},        {"del.txt": make_info("del.txt")}, "deleted file"),
+            ("deleted_ignored_not_shown", False, {},        {".git": make_info(".git")},       None),
+            ("deleted_empty_saved",       False, {},        {},                                None),
+        ],
+        ids=lambda p: p[0] if isinstance(p, tuple) else str(p)
+    )
+    def test_deleted_files(self, name, show_same, additional_current, additional_saved, expected_pattern):
+        filecheck.options['show_same_files'] = show_same
+        current = {"dirName": os.path.normpath("/test"), "files": dict(additional_current)}
+        saved = {"files": dict(additional_saved)}
+
+        import io, sys
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            filecheck.compareData(current, saved, os.path.normpath("/test"))
+        finally:
+            sys.stdout = old
+        output = buf.getvalue()
+
+        if expected_pattern is None:
+            assert output == "" or "deleted file" not in output
+        else:
+            assert expected_pattern in output
+
+    def test_multiple_statuses_in_one_run(self):
+        """Mix of new, modified, same, and deleted in one compareData call."""
+        filecheck.options['show_same_files'] = False
+        base = make_info("same.txt")
+        cur_new = make_info("new.txt")
+        cur_mod = make_info("mod.txt", hash_val="newhash", size=200, mtime=9999.0)
+        sav_mod = make_info("mod.txt", hash_val="oldhash", size=100, mtime=1000.0)
+        sav_del = make_info("deleted.txt", hash_val="ghost")
+
+        current = make_manifest([base, cur_new, cur_mod])
+        saved = make_manifest([base, sav_mod, sav_del])
+
+        import io, sys
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            filecheck.compareData(current, saved, os.path.normpath("/test"))
+        finally:
+            sys.stdout = old
+        output = buf.getvalue()
+
+        assert "new item" in output
+        assert "size mismatch" in output or "mtime mismatch" in output or "MD5 mismatch" in output
+        assert "deleted file" in output
+
+
+# ── checkEnd() ────────────────────────────────────────────────────────
+
+class TestCheckEnd:
+    def test_normal(self, tmp_path, capsys):
+        data = filecheck.filecheckNew(str(tmp_path))
+        data["files"]["f.txt"] = make_info("f.txt", dir_name=str(tmp_path))
+        saved_data = filecheck.filecheckNew(str(tmp_path))
+        saved_data["files"]["f.txt"] = make_info("f.txt", dir_name=str(tmp_path))
+        filecheck.filecheckSave(saved_data, str(tmp_path))
+        filecheck.options['show_same_files'] = True
+        filecheck.checkEnd(str(tmp_path), data)
+        captured = capsys.readouterr()
+        assert "f.txt" in captured.out
+
+    def test_invalid_manifest(self, tmp_path, monkeypatch):
+        """When filecheckLoad returns False, compareData receives False -> TypeError."""
+        def mock_load(*_):
+            return False
+        monkeypatch.setattr(filecheck, 'filecheckLoad', mock_load)
+        data = filecheck.filecheckNew(str(tmp_path))
+        data["files"]["f.txt"] = make_info("f.txt", dir_name=str(tmp_path))
+        with pytest.raises(TypeError):
+            filecheck.checkEnd(str(tmp_path), data)

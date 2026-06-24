@@ -213,7 +213,7 @@ def makeInfo(fileName, hashFunc=False):
             'fileName': os.path.basename(fileName),
             'hash': hash_val,
             'size': stat_info.st_size,
-            'ctime': stat_info.st_birthtime or stat_info.st_ctime,
+            'ctime': getattr(stat_info, 'st_birthtime', 0) or stat_info.st_ctime,
             'mtime': stat_info.st_mtime,
             'atime': stat_info.st_atime
         }
@@ -273,7 +273,7 @@ def check(directory):
     print(f"CHECK: {directory}")
     walkTree(directory, checkFile, options["recursive"], options["follow_links"], {}, checkBegin, checkEnd)
 
-if __name__ == '__main__':
+def main(argv=None):
     parser = argparse.ArgumentParser(description='Check file integrity')
     parser.add_argument('-v', '--verbose', action='store_true', help='display more info')
     subparsers = parser.add_subparsers(dest="command", help='command to execute')
@@ -301,14 +301,13 @@ if __name__ == '__main__':
     parser_check.add_argument('-l', '--follow-links', action='store_true', dest='follow_links', help='follow symbolic links')
     parser_check.add_argument('-s', '--show-same-files', action='store_true', help='show files that are the same')
     parser_check.add_argument('-a', '--check-atime', action='store_true', help='check access time')
-    #parser_check.add_argument('-A', '--ignore-atime', action='store_true', help='ignore access time')
     parser_check.add_argument('-c', '--check-ctime', action='store_true', help='check creation time')
-    #parser_check.add_argument('-C', '--ignore-ctime', action='store_true', help='ignore creation time')
     parser_check.add_argument('-M', '--ignore-mtime', action='store_true', help='ignore modification time')
     parser_check.add_argument('-S', '--ignore-size', action='store_true', help='ignore size')
     parser_check.add_argument('-H', '--ignore-hash', action='store_true', help='ignore hash (contents)')
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    global options
     options = vars(args)
     
     # Set default values for options that might not be present in all subcommands
@@ -330,3 +329,7 @@ if __name__ == '__main__':
                 import traceback
                 traceback.print_exc()
             sys.exit(1)
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])

@@ -1,5 +1,32 @@
+# manifest files
 .filecheck
 .filecheck.tmp
 */.filecheck
 */.filecheck.tmp
+
+# test artifacts
 tests/test
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# coverage output
+.coverage
+.coverage.*
+htmlcov/
+
+# packaging
+*.egg-info/
+dist/
+build/
+
+# virtual environment
+.venv/
+venv/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# project worktrees
+.claude/
