@@ -1,5 +1,10 @@
 # Code Audit & Architectural Recommendations
 
+Marks:
+ . => doing
+ * => done
+ x => won't do/not necessary anymore
+
 ## Security
 
 | # | Issue | Severity | Recommendation |
@@ -24,34 +29,34 @@
 
 | # | Issue | Severity | Recommendation |
 |---|-------|----------|----------------|
-| 11 | **Non-standard line ending `\r\r\n`** — Defined at `filecheck.py:13` as the manifest line terminator. This will cause interoperability problems on all platforms, especially Unix. | High | Replace with `\n` (or at worst `\r\n`). Backward compatibility can be handled by detecting the existing line ending on load. |
-| 12 | **No atomic manifest write** — `filecheckSave()` writes directly to `.filecheck`. A crash mid-write corrupts the manifest. | High | Write to `.filecheck.tmp` then `os.rename()` (atomic on most file systems). |
-| 13 | **Undefined variable in exception handler** — `filecheckSave()` line 98 references `filecheckDirName` which is never defined; should be `dirName` or `data["dirName"]`. | High | Fix the variable name. |
-| 14 | **`st_birthtime` may not exist** — `makeInfo()` line 216 uses `stat_info.st_birthtime or stat_info.st_ctime`. On Linux, `st_birthtime` doesn't exist, raising `AttributeError`. `st_ctime` on Linux is *change time*, not *creation time*. | High | Use `getattr(stat_info, 'st_birthtime', stat_info.st_ctime)`. |
-| 15 | **No recursion depth guard** — `walkTree()` is recursive. Deeply nested directory structures (thousands of levels) will cause `RecursionError`. | Medium | Convert to iterative stack or use `os.walk()` (which is iterative internally). |
-| 16 | **TOCTOU race in manifest overwrite** — Lines 89-92: `isfile()`, `unlink()`, then `open()`. The file could be re-created between unlink and open. | Medium | Open with `"wt"` directly (truncates), or write to a temp file and rename. |
+|*11 | **Non-standard line ending `\r\r\n`** — Defined at `filecheck.py:13` as the manifest line terminator. This will cause interoperability problems on all platforms, especially Unix. | High | Replace with `\n` (or at worst `\r\n`). Backward compatibility can be handled by detecting the existing line ending on load. |
+|*12 | **No atomic manifest write** — `filecheckSave()` writes directly to `.filecheck`. A crash mid-write corrupts the manifest. | High | Write to `.filecheck.tmp` then `os.rename()` (atomic on most file systems). |
+|x13 | **Undefined variable in exception handler** — `filecheckSave()` line 98 references `filecheckDirName` which is never defined; should be `dirName` or `data["dirName"]`. | High | Fix the variable name. |
+|x14 | **`st_birthtime` may not exist** — `makeInfo()` line 216 uses `stat_info.st_birthtime or stat_info.st_ctime`. On Linux, `st_birthtime` doesn't exist, raising `AttributeError`. `st_ctime` on Linux is *change time*, not *creation time*. | High | Use `getattr(stat_info, 'st_birthtime', stat_info.st_ctime)`. |
+|*15 | **No recursion depth guard** — `walkTree()` is recursive. Deeply nested directory structures (thousands of levels) will cause `RecursionError`. | Medium | Convert to iterative stack or use `os.walk()` (which is iterative internally). |
+|*16 | **TOCTOU race in manifest overwrite** — Lines 89-92: `isfile()`, `unlink()`, then `open()`. The file could be re-created between unlink and open. | Medium | Open with `"wt"` directly (truncates), or write to a temp file and rename. |
 | 17 | **`ignoreFiles` mixes exact strings and globs** — `".git"` is exact, `"Icon*"` is a glob. `fnmatch` treats `".git"` as a pattern too, which happens to match exactly. This works but is unclear. | Low | Separate literal names from patterns, or make all entries explicit globs. |
-| 18 | **No `--exclude`/`--include` CLI flags** — Users must edit source code to add patterns. | Low | Accept `--exclude` and `--include` patterns on the command line. |
+|.18 | **No `--exclude`/`--include` CLI flags** — Users must edit source code to add patterns. | Low | Accept `--exclude` and `--include` patterns on the command line. |
 | 19 | **Signature string is fragile** — A Unicode arrow character (`U+27F9`) is used as a version delimiter. Encoding mismatches could cause false "invalid header" errors on load. | Low | Use a simple ASCII version string. |
 
 ## Modern Practices / Code Quality
 
 | # | Issue | Severity | Recommendation |
 |---|-------|----------|----------------|
-| 20 | **Global mutable `options` dict** — Defined at module level at `filecheck.py:15`, mutated by CLI parsing, accessed throughout. This prevents reentrancy and complicates testing. | Medium | Pass options as a parameter or use a dataclass/namespace. |
+|.20 | **Global mutable `options` dict** — Defined at module level at `filecheck.py:15`, mutated by CLI parsing, accessed throughout. This prevents reentrancy and complicates testing. | Medium | Pass options as a parameter or use a dataclass/namespace. |
 | 21 | **No type hints** — The codebase has zero annotations despite targeting Python 3. | Medium | Add type hints for all function signatures. |
-| 22 | **`os.path` instead of `pathlib`** — Throughout the codebase. `pathlib.Path` provides a cleaner, object-oriented API. | Low | Migrate to `pathlib.Path`. |
+|.22 | **`os.path` instead of `pathlib`** — Throughout the codebase. `pathlib.Path` provides a cleaner, object-oriented API. | Low | Migrate to `pathlib.Path`. |
 | 23 | **Broad except clauses** — Several functions catch `Exception` generically (lines 31, 51, 97, 200, 221, 328). This can hide actual bugs. | Medium | Catch specific exceptions (e.g., `PermissionError`, `FileNotFoundError`). |
-| 24 | **Hardcoded `python3` in test** — `test_filecheck.py:24` runs `python3 filecheck.py ...`. Fails if Python 3 is not on PATH as `python3`. | Low | Use `sys.executable` or `venv` shebang. |
+|.24 | **Hardcoded `python3` in test** — `test_filecheck.py:24` runs `python3 filecheck.py ...`. Fails if Python 3 is not on PATH as `python3`. | Low | Use `sys.executable` or `venv` shebang. |
 | 25 | **No CI configuration** — No `.github/workflows/`, `.gitlab-ci.yml`, or similar. | Low | Add CI to run tests on push. |
-| 26 | **No `__init__.py`** — Can't be imported as a package. | Low | Restructure as a package with `__init__.py` and `__main__.py`. |
-| 27 | **Duplicate CLI argument definitions** — `--check-atime`, `--check-ctime`, etc. are defined separately for `update` and `check` subparsers. | Low | Use a shared parent parser with `add_parser(..., parents=[...])`. |
+|x26 | **No `__init__.py`** — Can't be imported as a package. | Low | Restructure as a package with `__init__.py` and `__main__.py`. |
+|r.7 | **Duplicate CLI argument definitions** — `--check-atime`, `--check-ctime`, etc. are defined separately for `update` and `check` subparsers. | Low | Use a shared parent parser with `add_parser(..., parents=[...])`. |
 
 ## Missing Features
 
 | # | Feature | Rationale |
 |---|---------|-----------|
-| 28 | **Non-zero exit code on mismatch** — `check` always exits 0. Should exit with a code indicating how many files differ (or at least 1 if any difference found). |
+|.28 | **Non-zero exit code on mismatch** — `check` always exits 0. Should exit with a code indicating how many files differ (or at least 1 if any difference found). |
 | 29 | **Check summary** — Print "X files matched, Y modified, Z new, W deleted" at end. |
 | 30 | **`--dry-run`** — Show what would change without writing the manifest. |
 | 31 | **`--format json`** — Machine-readable output for scripting. |
