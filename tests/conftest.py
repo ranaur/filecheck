@@ -2,24 +2,13 @@ import pytest
 import filecheck
 import os
 import stat
-
-
-DEFAULT_OPTIONS = {
-    'recursive': False,
-    'follow_links': False,
-    'check_atime': False,
-    'check_ctime': False,
-    'ignore_mtime': False,
-    'ignore_size': False,
-    'show_same_files': False,
-    'ignore_hash': False,
-    'verbose': False,
-}
+from filecheck import Options
 
 
 @pytest.fixture(autouse=True)
 def reset_globals():
-    filecheck.options = dict(DEFAULT_OPTIONS)
+    filecheck.options = Options()
+    filecheck.check_exit_code = 0
 
 
 def make_info(file_name, hash_val="abc123", size=100,

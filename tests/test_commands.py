@@ -10,7 +10,7 @@ class TestGenerateCommand:
         sub = tmp_path / "sub"
         sub.mkdir()
         create_file(sub / "nested.txt", b"nested")
-        filecheck.options['recursive'] = False
+        filecheck.options.recursive = False
         filecheck.generate(str(tmp_path))
         mf = tmp_path / ".filecheck"
         assert mf.is_file()
@@ -25,7 +25,7 @@ class TestGenerateCommand:
         sub = tmp_path / "sub"
         sub.mkdir()
         create_file(sub / "nested.txt", b"nested")
-        filecheck.options['recursive'] = True
+        filecheck.options.recursive = True
         filecheck.generate(str(tmp_path))
         loaded = filecheck.filecheckLoad(str(tmp_path))
         assert "f.txt" in loaded["files"]
@@ -36,7 +36,7 @@ class TestGenerateCommand:
 
     def test_generate_verbose(self, tmp_path, capsys):
         create_file(tmp_path / "f.txt", b"data")
-        filecheck.options['verbose'] = True
+        filecheck.options.verbose = True
         filecheck.generate(str(tmp_path))
         captured = capsys.readouterr()
         assert str(tmp_path) in captured.out
@@ -46,7 +46,7 @@ class TestGenerateCommand:
 class TestUpdateCommand:
     def test_update_existing(self, tmp_path, capsys):
         create_file(tmp_path / "f.txt", b"original")
-        filecheck.options['recursive'] = False
+        filecheck.options.recursive = False
         filecheck.generate(str(tmp_path))
         old_hash = filecheck.filecheckLoad(str(tmp_path))["files"]["f.txt"]["hash"]
         create_file(tmp_path / "f.txt", b"modified content")
@@ -58,7 +58,7 @@ class TestUpdateCommand:
 
     def test_update_no_changes(self, tmp_path, capsys):
         create_file(tmp_path / "f.txt", b"stable")
-        filecheck.options['recursive'] = False
+        filecheck.options.recursive = False
         filecheck.generate(str(tmp_path))
         original_hash = filecheck.filecheckLoad(str(tmp_path))["files"]["f.txt"]["hash"]
         filecheck.update(str(tmp_path))
@@ -69,9 +69,9 @@ class TestUpdateCommand:
 class TestCheckCommand:
     def test_check_no_changes(self, tmp_path, capsys):
         create_file(tmp_path / "f.txt", b"data")
-        filecheck.options['recursive'] = False
+        filecheck.options.recursive = False
         filecheck.generate(str(tmp_path))
-        filecheck.options['show_same_files'] = True
+        filecheck.options.show_same_files = True
         filecheck.check(str(tmp_path))
         captured = capsys.readouterr()
         assert "CHECK:" in captured.out
@@ -79,7 +79,7 @@ class TestCheckCommand:
 
     def test_check_detects_new_file(self, tmp_path, capsys):
         create_file(tmp_path / "f.txt", b"data")
-        filecheck.options['recursive'] = False
+        filecheck.options.recursive = False
         filecheck.generate(str(tmp_path))
         create_file(tmp_path / "g.txt", b"new")
         filecheck.check(str(tmp_path))
@@ -88,7 +88,7 @@ class TestCheckCommand:
 
     def test_check_detects_deleted_file(self, tmp_path, capsys):
         create_file(tmp_path / "f.txt", b"data")
-        filecheck.options['recursive'] = False
+        filecheck.options.recursive = False
         filecheck.generate(str(tmp_path))
         (tmp_path / "f.txt").unlink()
         filecheck.check(str(tmp_path))

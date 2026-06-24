@@ -87,6 +87,22 @@ class TestShouldIgnore:
     def test_should_ignore_false(self, path):
         assert filecheck.shouldIgnore(path) is False
 
+    def test_exclude_pattern_matches(self):
+        filecheck.options.exclude = ["*.log"]
+        assert filecheck.shouldIgnore("test.log")
+
+    def test_exclude_pattern_no_match(self):
+        filecheck.options.exclude = ["*.log"]
+        assert not filecheck.shouldIgnore("test.txt")
+
+    def test_include_overrides_default_ignore(self):
+        filecheck.options.include = ["*"]
+        assert not filecheck.shouldIgnore(".filecheck")
+
+    def test_include_does_not_override_without_match(self):
+        filecheck.options.include = ["*.py"]
+        assert filecheck.shouldIgnore(".filecheck")
+
 
 # ── filecheckNew() ────────────────────────────────────────────────────
 
@@ -157,17 +173,40 @@ class TestFilecheckSave:
         assert "v2.txt" in lines[1]
 
     def test_save_exception(self, tmp_path, capsys, monkeypatch):
-        """When os.unlink raises, the save is aborted and error is printed."""
+        """When os.replace raises, the save is aborted and error is printed."""
         data = filecheck.filecheckNew(str(tmp_path))
         (tmp_path / ".filecheck").write_text("dummy", encoding="utf-8")
-        def mock_unlink(_):
-            raise OSError("mock unlink error")
-        monkeypatch.setattr(os, 'unlink', mock_unlink)
+        def mock_replace(*_):
+            raise OSError("mock replace error")
+        monkeypatch.setattr(os, 'replace', mock_replace)
         filecheck.filecheckSave(data, str(tmp_path))
         captured = capsys.readouterr()
         assert "cannot save info" in captured.out
-        # File content unchanged because unlink failed and open didn't happen
+        # File content unchanged because replace failed
         assert (tmp_path / ".filecheck").read_text(encoding="utf-8") == "dummy"
+
+    def test_uses_unix_line_endings(self, tmp_path):
+        """New manifests use \\n line endings (not \\r\\r\\n)."""
+        data = filecheck.filecheckNew(str(tmp_path))
+        data["files"]["f.txt"] = {
+            "fileName": "f.txt", "hash": "abc",
+            "size": 10, "ctime": 1.0, "mtime": 2.0, "atime": 3.0,
+        }
+        filecheck.filecheckSave(data, str(tmp_path))
+        raw = (tmp_path / ".filecheck").read_bytes()
+        assert raw.endswith(b"\n"), "must end with \\n"
+        assert not raw.endswith(b"\r\r\n"), "must NOT end with old \\r\\r\\n"
+
+    def test_no_temp_file_left_after_save(self, tmp_path):
+        """Temp file is cleaned up after successful save."""
+        data = filecheck.filecheckNew(str(tmp_path))
+        data["files"]["f.txt"] = {
+            "fileName": "f.txt", "hash": "abc",
+            "size": 10, "ctime": 1.0, "mtime": 2.0, "atime": 3.0,
+        }
+        filecheck.filecheckSave(data, str(tmp_path))
+        assert not (tmp_path / ".filecheck.tmp").exists()
+        assert (tmp_path / ".filecheck").exists()
 
 
 # ── filecheckLoad() ───────────────────────────────────────────────────
@@ -246,17 +285,41 @@ class TestFilecheckLoad:
         result = filecheck.filecheckLoad(str(tmp_path))
         assert result["files"] == {}
 
+    def test_loads_old_cr_cr_lf_manifest(self, tmp_path):
+        """Backward compat: manifest with \\r\\r\\n endlines is loadable."""
+        mf = tmp_path / ".filecheck"
+        raw = (
+            f"\ufeffFILECHECK:{filecheck.version}:{filecheck.signature}\r\r\n"
+            f"abc:10:1.0:2.0:3.0:f.txt\r\r\n"
+        ).encode("utf-8")
+        mf.write_bytes(raw)
+        loaded = filecheck.filecheckLoad(str(tmp_path))
+        assert "f.txt" in loaded["files"]
+        assert loaded["files"]["f.txt"]["hash"] == "abc"
+
+    def test_loads_cr_lf_manifest(self, tmp_path):
+        """Backward compat: manifest with \\r\\n endlines is loadable."""
+        mf = tmp_path / ".filecheck"
+        raw = (
+            f"\ufeffFILECHECK:{filecheck.version}:{filecheck.signature}\r\n"
+            f"abc:10:1.0:2.0:3.0:f.txt\r\n"
+        ).encode("utf-8")
+        mf.write_bytes(raw)
+        loaded = filecheck.filecheckLoad(str(tmp_path))
+        assert "f.txt" in loaded["files"]
+        assert loaded["files"]["f.txt"]["hash"] == "abc"
+
 
 # ── generateBegin() / generateEnd() ───────────────────────────────────
 
 class TestGenerateBeginEnd:
     def test_generate_begin_default(self):
-        filecheck.options['verbose'] = False
+        filecheck.options.verbose = False
         data = filecheck.generateBegin("/my/dir")
         assert data["dirName"] == "/my/dir"
 
     def test_generate_begin_verbose(self, capsys):
-        filecheck.options['verbose'] = True
+        filecheck.options.verbose = True
         data = filecheck.generateBegin("/my/dir")
         assert data["dirName"] == "/my/dir"
         captured = capsys.readouterr()
@@ -346,7 +409,7 @@ class TestMakeInfo:
             st_uid=0, st_gid=0, st_size=4,
             st_atime=3000.0, st_mtime=2000.0, st_ctime=1234.0,
         )
-        monkeypatch.setattr(os, 'stat', lambda _: nb)
+        monkeypatch.setattr(os, 'stat', lambda _, **__: nb)
         info = filecheck.makeInfo(str(f), False)
         assert info["ctime"] == 1234.0
 

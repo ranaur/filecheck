@@ -41,7 +41,8 @@ mkdir test
 fc generate test
 fc check test
 
-assertFileMD5 test/.filecheck edb8fe59d0410d8a2f51af16d4ed551e
+#assertFileMD5 test/.filecheck edb8fe59d0410d8a2f51af16d4ed551e when used \r\r\n to separate lines
+assertFileMD5 test/.filecheck b602183573352abf933bc7ca85fd0629
 
 echo "One" > test/One
 

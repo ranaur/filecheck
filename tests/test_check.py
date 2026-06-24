@@ -9,12 +9,12 @@ from pathlib import Path
 
 class TestCheckBegin:
     def test_default(self):
-        filecheck.options['verbose'] = False
+        filecheck.options.verbose = False
         data = filecheck.checkBegin("/my/dir")
         assert data["dirName"] == "/my/dir"
 
     def test_verbose(self, capsys):
-        filecheck.options['verbose'] = True
+        filecheck.options.verbose = True
         data = filecheck.checkBegin("/my/dir")
         assert data["dirName"] == "/my/dir"
         captured = capsys.readouterr()
@@ -75,8 +75,9 @@ class TestCompareData:
         ids=lambda p: p[0] if isinstance(p, tuple) else str(p)
     )
     def test_outcomes(self, name, opts, curr_overrides, saved_overrides, expected):
-        filecheck.options.update(opts)
-        filecheck.options['show_same_files'] = True
+        for k, v in opts.items():
+            setattr(filecheck.options, k, v)
+        filecheck.options.show_same_files = True
         current, saved = self._setup_outcome(curr_overrides, saved_overrides)
         output = self._run_compare(current, saved, os.path.normpath("/test"))
         if expected == "same file":
@@ -86,7 +87,7 @@ class TestCompareData:
 
     def test_new_item(self):
         """File in current but not in saved -> new item."""
-        filecheck.options['show_same_files'] = False
+        filecheck.options.show_same_files = False
         cur = make_info("f.txt")
         current = make_manifest([cur])
         saved = make_manifest([])
@@ -109,8 +110,8 @@ class TestCompareData:
         sav = make_info("f.txt", hash_val="abc123", dir_name=str(tmp_path))
         current = make_manifest([cur], dir_name=str(tmp_path))
         saved = make_manifest([sav], dir_name=str(tmp_path))
-        filecheck.options['show_same_files'] = True
-        filecheck.options['ignore_hash'] = False
+        filecheck.options.show_same_files = True
+        filecheck.options.ignore_hash = False
 
         import io, sys
         buf = io.StringIO()
@@ -134,8 +135,8 @@ class TestCompareData:
         sav = make_info("f.txt", hash_val="abc123", dir_name=str(tmp_path))
         current = make_manifest([cur], dir_name=str(tmp_path))
         saved = make_manifest([sav], dir_name=str(tmp_path))
-        filecheck.options['show_same_files'] = True
-        filecheck.options['ignore_hash'] = True
+        filecheck.options.show_same_files = True
+        filecheck.options.ignore_hash = True
 
         import io, sys
         buf = io.StringIO()
@@ -159,7 +160,7 @@ class TestCompareData:
         ids=lambda p: p[0] if isinstance(p, tuple) else str(p)
     )
     def test_deleted_files(self, name, show_same, additional_current, additional_saved, expected_pattern):
-        filecheck.options['show_same_files'] = show_same
+        filecheck.options.show_same_files = show_same
         current = {"dirName": os.path.normpath("/test"), "files": dict(additional_current)}
         saved = {"files": dict(additional_saved)}
 
@@ -180,7 +181,7 @@ class TestCompareData:
 
     def test_multiple_statuses_in_one_run(self):
         """Mix of new, modified, same, and deleted in one compareData call."""
-        filecheck.options['show_same_files'] = False
+        filecheck.options.show_same_files = False
         base = make_info("same.txt")
         cur_new = make_info("new.txt")
         cur_mod = make_info("mod.txt", hash_val="newhash", size=200, mtime=9999.0)
@@ -214,7 +215,7 @@ class TestCheckEnd:
         saved_data = filecheck.filecheckNew(str(tmp_path))
         saved_data["files"]["f.txt"] = make_info("f.txt", dir_name=str(tmp_path))
         filecheck.filecheckSave(saved_data, str(tmp_path))
-        filecheck.options['show_same_files'] = True
+        filecheck.options.show_same_files = True
         filecheck.checkEnd(str(tmp_path), data)
         captured = capsys.readouterr()
         assert "f.txt" in captured.out

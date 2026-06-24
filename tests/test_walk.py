@@ -85,7 +85,7 @@ class TestWalkTree:
         bad_path = str(tmp_path / "bad.txt")
         original_lstat = os.lstat
         def mock_lstat(path):
-            if path == bad_path:
+            if str(path) == bad_path:
                 raise PermissionError(f"cannot stat {path}")
             return original_lstat(path)
         monkeypatch.setattr(os, 'lstat', mock_lstat)
@@ -100,11 +100,10 @@ class TestWalkTree:
         """Symlink is skipped when followLink=False (mock os.lstat)."""
         (tmp_path / "target.txt").write_text("real")
         link_path = str(tmp_path / "link.txt")
-        # Create a real file, then mock its lstat to look like a symlink
         (tmp_path / "link.txt").write_text("dummy")
         original_lstat = os.lstat
         def mock_lstat(path):
-            if path == link_path:
+            if str(path) == link_path:
                 class MockStat:
                     st_mode = stat.S_IFLNK | 0o777
                 return MockStat()
@@ -121,7 +120,7 @@ class TestWalkTree:
         (tmp_path / "link.txt").write_text("dummy")
         original_lstat = os.lstat
         def mock_lstat(path):
-            if path == link_path:
+            if str(path) == link_path:
                 class MockStat:
                     st_mode = stat.S_IFLNK | 0o777
                 return MockStat()
@@ -187,7 +186,7 @@ class TestWalkTree:
         special = str(special_path)
         original_lstat = os.lstat
         def mock_lstat(path):
-            if path == special:
+            if str(path) == special:
                 class MockStat:
                     st_mode = stat.S_IFIFO | 0o644
                 return MockStat()
@@ -198,6 +197,47 @@ class TestWalkTree:
         captured = capsys.readouterr()
         assert "Skipping" in captured.out
         assert "special_device" in captured.out
+
+    # ── Deep nesting (iterative walk guard) ─────────────────────────
+
+    def test_deep_nested_recursive_iterative(self, tmp_path):
+        """The iterative walk visits deeply nested dirs the same as recursive."""
+        base = str(tmp_path)
+        leaf = os.path.join(base, "a", "b", "c", "d", "e", "f", "g", "leaf.txt")
+        os.makedirs(os.path.dirname(leaf), exist_ok=True)
+        with open(leaf, "w") as f:
+            f.write("deep")
+        expected = [
+            os.path.join(base, "a"),
+            os.path.join(base, "a", "b"),
+            os.path.join(base, "a", "b", "c"),
+            os.path.join(base, "a", "b", "c", "d"),
+            os.path.join(base, "a", "b", "c", "d", "e"),
+            os.path.join(base, "a", "b", "c", "d", "e", "f"),
+            os.path.join(base, "a", "b", "c", "d", "e", "f", "g"),
+            os.path.join(base, "a", "b", "c", "d", "e", "f", "g", "leaf.txt"),
+        ]
+
+        results = []
+        def cb(p, _):
+            results.append(p)
+
+        filecheck.walkTree(base, cb, True, False, {})
+        assert results == expected
+
+    # ── iterdir failure ──────────────────────────────────────────────
+
+    def test_iterdir_failure_skips_directory(self, tmp_path, monkeypatch):
+        (tmp_path / "f.txt").write_text("x")
+        from pathlib import Path
+        original_iterdir = Path.iterdir
+        def mock_iterdir(self):
+            if str(self) == str(tmp_path):
+                raise PermissionError("cannot read")
+            return original_iterdir(self)
+        monkeypatch.setattr(Path, 'iterdir', mock_iterdir)
+        results = self.collect(tmp_path)
+        assert results == []
 
     # ── Empty directory ──────────────────────────────────────────────
 

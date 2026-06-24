@@ -117,3 +117,29 @@ class TestCLI:
         )
         assert ret == 0
         assert "UPDATE:" in out
+
+    def test_check_exit_code_nonzero_on_mismatch(self, tmp_path):
+        (tmp_path / "f.txt").write_text("data")
+        self.run_main(["generate", "."], tmp_path)
+        (tmp_path / "f.txt").write_text("modified")
+        ret, out = self.run_main(["check", "."], tmp_path)
+        assert ret != 0
+
+    def test_exclude_flag_via_cli(self, tmp_path):
+        (tmp_path / "keep.txt").write_text("keep")
+        (tmp_path / "ignore.log").write_text("ignore")
+        ret, out = self.run_main(["generate", "--exclude", "*.log", "."], tmp_path)
+        assert ret == 0
+        loaded = filecheck.filecheckLoad(str(tmp_path))
+        assert "keep.txt" in loaded["files"]
+        assert "ignore.log" not in loaded["files"]
+
+    def test_include_flag_via_cli(self, tmp_path):
+        """--include pattern overrides ignore list so normally-ignored files are tracked."""
+        (tmp_path / "_IconShouldBeIgnored").write_text("normally ignored")
+        (tmp_path / "regular.txt").write_text("normal")
+        ret, out = self.run_main(["generate", "--include", "Icon*", "."], tmp_path)
+        assert ret == 0
+        loaded = filecheck.filecheckLoad(str(tmp_path))
+        assert "regular.txt" in loaded["files"]
+        assert "_IconShouldBeIgnored" in loaded["files"]

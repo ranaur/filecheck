@@ -8,7 +8,7 @@ from tests.conftest import make_info, create_file
 
 class TestUpdateBegin:
     def test_verbose(self, capsys, tmp_path):
-        filecheck.options['verbose'] = True
+        filecheck.options.verbose = True
         result = filecheck.updateBegin(str(tmp_path))
         assert "old" in result
         assert "new" in result
@@ -16,7 +16,7 @@ class TestUpdateBegin:
         assert str(tmp_path) in captured.out
 
     def test_non_verbose(self, tmp_path):
-        filecheck.options['verbose'] = False
+        filecheck.options.verbose = False
         result = filecheck.updateBegin(str(tmp_path))
         assert "old" in result
         assert "new" in result
@@ -68,8 +68,8 @@ class TestUpdateFile:
         assert data["new"]["files"]["f.txt"]["hash"] != "oldhash"
 
     def test_ctime_changed(self, tmp_path, capsys):
-        filecheck.options['check_ctime'] = True
-        filecheck.options['ignore_size'] = True
+        filecheck.options.check_ctime = True
+        filecheck.options.ignore_size = True
         f = create_file(tmp_path / "f.txt", b"same content")
         old_info = make_info("f.txt", hash_val="oldhash", size=14, ctime=1000.0, dir_name=str(tmp_path))
         data = self.make_update_data(tmp_path, [old_info])
@@ -78,9 +78,9 @@ class TestUpdateFile:
         assert "reason: ctime" in captured.out or "Regenerating" in captured.out
 
     def test_atime_changed(self, tmp_path, capsys):
-        filecheck.options['check_atime'] = True
-        filecheck.options['check_ctime'] = False
-        filecheck.options['ignore_size'] = True
+        filecheck.options.check_atime = True
+        filecheck.options.check_ctime = False
+        filecheck.options.ignore_size = True
         f = create_file(tmp_path / "f.txt", b"same content")
         old_info = make_info("f.txt", hash_val="oldhash", size=14, ctime=1000.0, atime=1000.0, dir_name=str(tmp_path))
         data = self.make_update_data(tmp_path, [old_info])
@@ -89,8 +89,8 @@ class TestUpdateFile:
         assert "Regenerating" in captured.out
 
     def test_mtime_changed(self, tmp_path, capsys):
-        filecheck.options['ignore_size'] = True
-        filecheck.options['ignore_mtime'] = False
+        filecheck.options.ignore_size = True
+        filecheck.options.ignore_mtime = False
         f = create_file(tmp_path / "f.txt", b"same content")
         old_info = make_info("f.txt", hash_val="oldhash", size=14, mtime=1000.0, dir_name=str(tmp_path))
         data = self.make_update_data(tmp_path, [old_info])
@@ -102,10 +102,10 @@ class TestUpdateFile:
     # --- changed=False path ---
 
     def test_no_change(self, tmp_path, capsys):
-        filecheck.options['ignore_size'] = True
-        filecheck.options['ignore_mtime'] = False
-        filecheck.options['check_ctime'] = False
-        filecheck.options['check_atime'] = False
+        filecheck.options.ignore_size = True
+        filecheck.options.ignore_mtime = False
+        filecheck.options.check_ctime = False
+        filecheck.options.check_atime = False
         f = create_file(tmp_path / "f.txt", b"data")
         old_info = make_info("f.txt", hash_val="existing", size=4, mtime=2000.0, dir_name=str(tmp_path))
         data = self.make_update_data(tmp_path, [old_info])
@@ -120,10 +120,10 @@ class TestUpdateFile:
 
     def test_no_change_all_checks_disabled(self, tmp_path):
         """If all checks are disabled/skipped and file exists in old, hash is copied."""
-        filecheck.options['ignore_size'] = True
-        filecheck.options['ignore_mtime'] = True
-        filecheck.options['check_ctime'] = False
-        filecheck.options['check_atime'] = False
+        filecheck.options.ignore_size = True
+        filecheck.options.ignore_mtime = True
+        filecheck.options.check_ctime = False
+        filecheck.options.check_atime = False
         f = create_file(tmp_path / "f.txt", b"data")
         old_info = make_info("f.txt", hash_val="existing_hash", size=999, mtime=9999.0, ctime=9999.0, dir_name=str(tmp_path))
         data = self.make_update_data(tmp_path, [old_info])
