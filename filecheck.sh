@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 FILECHECK_PY="$(dirname $(readlink -f "$0"))/filecheck.py"
 
 type python >& /dev/null
