@@ -79,6 +79,19 @@ class TestComputeHash:
         expected = hashlib.sha256(b"hello world").hexdigest()
         assert filecheck._compute_hash(str(f)) == expected
 
+    def test_compute_hash_batch_exception(self, tmp_path, monkeypatch):
+        """_compute_hash_batch's except clause when _compute_hash raises unexpectedly."""
+        f = create_file(tmp_path / "f.txt", b"data")
+        data = filecheck.filecheckNew(str(tmp_path))
+        data["files"]["f.txt"] = {
+            "dirName": str(tmp_path), "fileName": "f.txt", "hash": "",
+        }
+        def mock_hash(p, algorithm=None):
+            raise RuntimeError("unexpected")
+        monkeypatch.setattr(filecheck, '_compute_hash', mock_hash)
+        filecheck._compute_hash_batch(data["files"])
+        assert data["files"]["f.txt"]["hash"] == "error"
+
 
 # ── shouldIgnore() ────────────────────────────────────────────────────
 
@@ -227,6 +240,17 @@ class TestFilecheckSave:
         assert not (tmp_path / ".filecheck.tmp").exists()
         assert (tmp_path / ".filecheck").exists()
 
+    def test_saves_algorithm_in_header(self, tmp_path):
+        filecheck.options.algorithm = "sha256"
+        data = filecheck.filecheckNew(str(tmp_path))
+        data["files"]["f.txt"] = {
+            "fileName": "f.txt", "hash": "abc",
+            "size": 10, "ctime": 1.0, "mtime": 2.0, "atime": 3.0,
+        }
+        filecheck.filecheckSave(data, str(tmp_path))
+        raw = (tmp_path / ".filecheck").read_bytes()
+        assert b"sha256" in raw
+
 
 # ── filecheckLoad() ───────────────────────────────────────────────────
 
@@ -327,6 +351,28 @@ class TestFilecheckLoad:
         loaded = filecheck.filecheckLoad(str(tmp_path))
         assert "f.txt" in loaded["files"]
         assert loaded["files"]["f.txt"]["hash"] == "abc"
+
+    def test_loads_algorithm_from_header(self, tmp_path):
+        """Algorithm field from header is stored in loaded data."""
+        mf = tmp_path / ".filecheck"
+        mf.write_text(
+            f"FILECHECK:{filecheck.version}:{filecheck.signature}:sha256\n"
+            f"abc:10:1.0:2.0:3.0:f.txt\n",
+            encoding="utf-8",
+        )
+        loaded = filecheck.filecheckLoad(str(tmp_path))
+        assert loaded["algorithm"] == "sha256"
+
+    def test_three_field_header_defaults_to_md5(self, tmp_path):
+        """Header without algorithm field (3 fields) defaults to md5."""
+        mf = tmp_path / ".filecheck"
+        mf.write_text(
+            f"FILECHECK:{filecheck.version}:{filecheck.signature}\n"
+            f"abc:10:1.0:2.0:3.0:f.txt\n",
+            encoding="utf-8",
+        )
+        loaded = filecheck.filecheckLoad(str(tmp_path))
+        assert loaded["algorithm"] == "md5"
 
 
 # ── generateBegin() / generateEnd() ───────────────────────────────────

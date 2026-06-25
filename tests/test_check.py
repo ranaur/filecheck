@@ -229,3 +229,72 @@ class TestCheckEnd:
         data["files"]["f.txt"] = make_info("f.txt", dir_name=str(tmp_path))
         with pytest.raises(TypeError):
             filecheck.checkEnd(str(tmp_path), data)
+
+
+class TestSummaryCounters:
+    def test_new_item_increments_added(self):
+        current = make_manifest([make_info("f.txt")])
+        saved = make_manifest([])
+        filecheck.compareData(current, saved, os.path.normpath("/test"))
+        assert filecheck.check_added == 1
+        assert filecheck.check_exit_code == 1
+
+    def test_deleted_file_increments_deleted(self):
+        current = make_manifest([])
+        saved = make_manifest([make_info("del.txt")])
+        filecheck.compareData(current, saved, os.path.normpath("/test"))
+        assert filecheck.check_deleted == 1
+        assert filecheck.check_exit_code == 1
+
+    def test_modified_increments_modified(self):
+        cur = make_info("f.txt", hash_val="newhash", size=999)
+        sav = make_info("f.txt", hash_val="oldhash", size=100)
+        current = make_manifest([cur])
+        saved = make_manifest([sav])
+        filecheck.compareData(current, saved, os.path.normpath("/test"))
+        assert filecheck.check_modified == 1
+
+    def test_same_file_increments_same(self):
+        cur = make_info("f.txt", hash_val="abc")
+        sav = make_info("f.txt", hash_val="abc")
+        current = make_manifest([cur])
+        saved = make_manifest([sav])
+        filecheck.options.show_same_files = True
+        filecheck.compareData(current, saved, os.path.normpath("/test"))
+        assert filecheck.check_same == 1
+
+    def test_counts_accumulate_across_calls(self):
+        filecheck.compareData(
+            make_manifest([make_info("a.txt")]),
+            make_manifest([]),
+            os.path.normpath("/test"),
+        )
+        filecheck.compareData(
+            make_manifest([make_info("b.txt")]),
+            make_manifest([]),
+            os.path.normpath("/test"),
+        )
+        assert filecheck.check_added == 2
+
+    def test_quiet_check_suppresses_summary(self, tmp_path, capsys):
+        f = create_file(tmp_path / "f.txt", b"data")
+        filecheck.options.recursive = False
+        filecheck.options.show_same_files = True
+        filecheck.options.quiet = True
+        filecheck.generate(str(tmp_path))
+        filecheck.check(str(tmp_path))
+        captured = capsys.readouterr()
+        assert "Total:" not in captured.out
+        assert "same file" in captured.out
+
+    def test_check_outputs_summary(self, tmp_path, capsys):
+        f = create_file(tmp_path / "f.txt", b"data")
+        filecheck.options.recursive = False
+        filecheck.options.show_same_files = True
+        filecheck.options.quiet = False
+        filecheck.generate(str(tmp_path))
+        filecheck.check(str(tmp_path))
+        captured = capsys.readouterr()
+        assert "Total:" in captured.out
+        assert "Added:" in captured.out
+        assert "Same:" in captured.out
