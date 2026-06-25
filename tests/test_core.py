@@ -454,9 +454,9 @@ class TestMakeInfo:
         f = create_file(tmp_path / "f.txt", b"x")
         from pathlib import Path
         monkeypatch.setattr(Path, 'is_dir', lambda self: False)
-        def mock_stat(*_, **__):
+        def mock_path_stat(self, *, follow_symlinks=True):
             raise OSError("stat failed")
-        monkeypatch.setattr(os, 'stat', mock_stat)
+        monkeypatch.setattr(Path, 'stat', mock_path_stat)
         result = filecheck.makeInfo(str(f))
         assert result is None
         captured = capsys.readouterr()
@@ -466,6 +466,7 @@ class TestMakeInfo:
         """st_birthtime doesn't exist (Linux) — falls back to st_ctime."""
         f = create_file(tmp_path / "f.txt", b"data")
         import collections
+        from pathlib import Path
         NoBirthStat = collections.namedtuple(
             'NoBirthStat',
             'st_mode st_ino st_dev st_nlink st_uid st_gid '
@@ -476,7 +477,7 @@ class TestMakeInfo:
             st_uid=0, st_gid=0, st_size=4,
             st_atime=3000.0, st_mtime=2000.0, st_ctime=1234.0,
         )
-        monkeypatch.setattr(os, 'stat', lambda _, **__: nb)
+        monkeypatch.setattr(Path, 'stat', lambda self, **__: nb)
         info = filecheck.makeInfo(str(f), False)
         assert info["ctime"] == 1234.0
 
