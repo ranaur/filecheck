@@ -240,6 +240,28 @@ class TestWalkTree:
         results = self.collect(tmp_path)
         assert results == []
 
+    # ── BFS mode ─────────────────────────────────────────────────────
+
+    def test_bfs_processes_breadth_first(self, tmp_path):
+        """BFS fires endDir for all level-1 dirs before any level-2 dir."""
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        (tmp_path / "b" / "b1").mkdir()
+        (tmp_path / "a" / "a1").mkdir()
+
+        end_order = []
+        def begin(dn):
+            return {}
+        def end(dn, _data):
+            end_order.append(os.path.relpath(dn, tmp_path).replace("\\", "/"))
+
+        filecheck.walkTree(str(tmp_path), lambda p, d: None, True, False, {},
+                           begin, end, bfs=True)
+
+        assert end_order[:3] == [".", "a", "b"]
+        assert "a/a1" in end_order[3:]
+        assert "b/b1" in end_order[3:]
+
     # ── Empty directory ──────────────────────────────────────────────
 
     def test_empty_directory(self, tmp_path):

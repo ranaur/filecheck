@@ -206,6 +206,136 @@ class TestCompareData:
         assert "deleted file" in output
 
 
+# ── Progress during compareData() ─────────────────────────────────────
+
+class TestCompareDataProgress:
+    def test_progress_called_with_format(self, monkeypatch):
+        """_progress is called with 'dir [count/total] filename' format."""
+        calls = []
+        monkeypatch.setattr(filecheck, '_progress', lambda msg: calls.append(msg))
+        monkeypatch.setattr(filecheck, '_clear_progress', lambda: None)
+
+        cur1 = make_info("f.txt")
+        cur2 = make_info("g.txt")
+        sav1 = make_info("f.txt", hash_val="old")
+        sav2 = make_info("g.txt", hash_val="old")
+        current = make_manifest([cur1, cur2])
+        saved = make_manifest([sav1, sav2])
+        filecheck.options.show_same_files = True
+
+        filecheck.compareData(current, saved, os.path.normpath("/test"))
+
+        progress_msgs = [c for c in calls if "[1/2]" in c or "[2/2]" in c]
+        assert len(progress_msgs) >= 2
+        assert any("[1/2] f.txt" in c for c in progress_msgs)
+        assert any("[2/2] g.txt" in c for c in progress_msgs)
+
+    def test_clear_progress_before_stdout(self, monkeypatch):
+        """_clear_progress is called before each print."""
+        clear_calls = []
+        monkeypatch.setattr(filecheck, '_clear_progress', lambda: clear_calls.append(1))
+        monkeypatch.setattr(filecheck, '_progress', lambda msg: None)
+
+        import io, sys
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            current = make_manifest([make_info("f.txt", hash_val="x")])
+            saved = make_manifest([make_info("f.txt", hash_val="y")])
+            filecheck.options.show_same_files = True
+            filecheck.compareData(current, saved, os.path.normpath("/test"))
+        finally:
+            sys.stdout = old
+
+        output = buf.getvalue()
+        status_lines = [l for l in output.splitlines() if ":" in l]
+        assert len(status_lines) >= 1
+        assert len(clear_calls) >= len(status_lines)
+
+    def test_progress_restored_after_stdout(self, monkeypatch):
+        """_progress is called again after each print."""
+        progress_calls = []
+        monkeypatch.setattr(filecheck, '_progress', lambda msg: progress_calls.append(msg))
+        monkeypatch.setattr(filecheck, '_clear_progress', lambda: None)
+
+        import io, sys
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            current = make_manifest([make_info("f.txt", hash_val="x")])
+            saved = make_manifest([make_info("f.txt", hash_val="y")])
+            filecheck.options.show_same_files = True
+            filecheck.compareData(current, saved, os.path.normpath("/test"))
+        finally:
+            sys.stdout = old
+
+        # 1 initial progress + 1 after-print restore
+        assert len(progress_calls) >= 2
+        assert "f.txt" in progress_calls[-1]
+
+    def test_deleted_progress_format(self, monkeypatch):
+        """Deleted files show [deleted] in progress."""
+        calls = []
+        monkeypatch.setattr(filecheck, '_progress', lambda msg: calls.append(msg))
+        monkeypatch.setattr(filecheck, '_clear_progress', lambda: None)
+
+        current = make_manifest([])
+        saved = make_manifest([make_info("del.txt")])
+        filecheck.compareData(current, saved, os.path.normpath("/test"))
+
+        assert any("[deleted]" in c for c in calls)
+
+    def test_deleted_clear_before_print(self, monkeypatch):
+        """_clear_progress is called before printing deleted lines."""
+        clear_calls = []
+        monkeypatch.setattr(filecheck, '_clear_progress', lambda: clear_calls.append(1))
+        monkeypatch.setattr(filecheck, '_progress', lambda msg: None)
+
+        import io, sys
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            current = make_manifest([])
+            saved = make_manifest([make_info("del.txt"), make_info("gone.txt")])
+            filecheck.compareData(current, saved, os.path.normpath("/test"))
+        finally:
+            sys.stdout = old
+
+        output = buf.getvalue()
+        deleted_lines = [l for l in output.splitlines() if "deleted file" in l]
+        assert len(deleted_lines) == 2
+        assert len(clear_calls) >= 2
+
+    def test_no_progress_in_quiet_mode(self, monkeypatch):
+        """Quiet mode skips all _progress and _clear_progress calls."""
+        calls = []
+        monkeypatch.setattr(filecheck, '_progress', lambda msg: calls.append(msg))
+        monkeypatch.setattr(filecheck, '_clear_progress', lambda: calls.append("clear"))
+
+        filecheck.options.quiet = True
+        current = make_manifest([make_info("f.txt", hash_val="x")])
+        saved = make_manifest([make_info("f.txt", hash_val="y")])
+        filecheck.compareData(current, saved, os.path.normpath("/test"))
+
+        assert len(calls) == 0
+
+    def test_no_progress_in_verbose_mode(self, monkeypatch):
+        """Verbose mode skips all _progress and _clear_progress calls."""
+        calls = []
+        monkeypatch.setattr(filecheck, '_progress', lambda msg: calls.append(msg))
+        monkeypatch.setattr(filecheck, '_clear_progress', lambda: calls.append("clear"))
+
+        filecheck.options.verbose = True
+        current = make_manifest([make_info("f.txt", hash_val="x")])
+        saved = make_manifest([make_info("f.txt", hash_val="y")])
+        filecheck.compareData(current, saved, os.path.normpath("/test"))
+
+        assert len(calls) == 0
+
+
 # ── checkEnd() ────────────────────────────────────────────────────────
 
 class TestCheckEnd:

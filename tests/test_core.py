@@ -79,6 +79,45 @@ class TestComputeHash:
         expected = hashlib.sha256(b"hello world").hexdigest()
         assert filecheck._compute_hash(str(f)) == expected
 
+    def test_large_file_shows_percentage_progress(self, tmp_path, monkeypatch):
+        """Files >1MB trigger _progress calls with percentage."""
+        f = tmp_path / "big.bin"
+        f.write_bytes(b"X" * (1048576 + 1))
+        calls = []
+        monkeypatch.setattr(filecheck, '_progress', lambda msg: calls.append(msg))
+        filecheck._compute_hash(str(f))
+        assert any("(5%)" in c for c in calls)
+        assert any("(100%)" in c for c in calls)
+
+    def test_small_file_skips_percentage_progress(self, tmp_path, monkeypatch):
+        """Files <=1MB do NOT trigger _progress calls."""
+        f = tmp_path / "small.bin"
+        f.write_bytes(b"X" * 1048576)
+        calls = []
+        monkeypatch.setattr(filecheck, '_progress', lambda msg: calls.append(msg))
+        filecheck._compute_hash(str(f))
+        assert len(calls) == 0
+
+    def test_large_file_quiet_skips_progress(self, tmp_path, monkeypatch):
+        """Quiet mode suppresses file-read progress even for large files."""
+        f = tmp_path / "big.bin"
+        f.write_bytes(b"X" * (1048576 + 1))
+        calls = []
+        monkeypatch.setattr(filecheck, '_progress', lambda msg: calls.append(msg))
+        filecheck.options.quiet = True
+        filecheck._compute_hash(str(f))
+        assert len(calls) == 0
+
+    def test_large_file_verbose_skips_progress(self, tmp_path, monkeypatch):
+        """Verbose mode suppresses file-read progress even for large files."""
+        f = tmp_path / "big.bin"
+        f.write_bytes(b"X" * (1048576 + 1))
+        calls = []
+        monkeypatch.setattr(filecheck, '_progress', lambda msg: calls.append(msg))
+        filecheck.options.verbose = True
+        filecheck._compute_hash(str(f))
+        assert len(calls) == 0
+
     def test_compute_hash_batch_exception(self, tmp_path, monkeypatch):
         """_compute_hash_batch's except clause when _compute_hash raises unexpectedly."""
         f = create_file(tmp_path / "f.txt", b"data")
@@ -490,6 +529,27 @@ class TestMakeInfo:
         assert isinstance(info["atime"], float)
         assert isinstance(info["ctime"], float)
 
+
+# ── _progress() / _clear_progress() ──────────────────────────────────
+
+class TestProgress:
+    def test_get_terminal_size_fallback(self, monkeypatch):
+        monkeypatch.setattr(filecheck.shutil, 'get_terminal_size',
+                            lambda: (_ for _ in ()).throw(OSError))
+        filecheck._progress("/some/path")
+        filecheck._clear_progress()
+
+    def test_narrow_terminal(self, monkeypatch):
+        monkeypatch.setattr(filecheck.shutil, 'get_terminal_size',
+                            lambda: type("Size", (), {"columns": 1})())
+        filecheck._progress("/some/path")
+        filecheck._clear_progress()
+
+    def test_truncates_long_path(self, monkeypatch):
+        monkeypatch.setattr(filecheck.shutil, 'get_terminal_size',
+                            lambda: type("Size", (), {"columns": 10})())
+        filecheck._progress("/a/very/long/path/that/exceeds/width.txt")
+        filecheck._clear_progress()
 
 # ── helpers ───────────────────────────────────────────────────────────
 
