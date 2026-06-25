@@ -1,4 +1,3 @@
-[ ] Add ignore list / file
-[ ] Add new checksums (sha256, etc.)
-[ ] Migrate to python3
+[] Add a update mode that adds the new files only. That removes the deleted files, and onlly show the changed files.
+[] Create an SQLLite database withh all files and directories. Allow them to be queried.
 
