@@ -1,6 +1,8 @@
 #!/bin/bash
+pushd `dirname $0` > /dev/null
+
 function fc() {
-	`dirname $0`/../filecheck.sh -q $*
+	../filecheck.sh $*
 }
 
 function assertFileMD5() {
@@ -73,3 +75,5 @@ fc update -r test
 fc check -r test
 
 #rm -rf test
+
+popd > /dev/null
