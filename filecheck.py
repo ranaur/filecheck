@@ -9,11 +9,15 @@ import hashlib
 from fnmatch import fnmatch
 from dataclasses import dataclass, field
 from pathlib import Path
+import itertools
+import shutil
+import sys
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Any
 
 version: str = "0.2"
-signature: str = "ascii"
+signature: str = "FLCK"
 endline: str = "\n"
 
 filecheckName: str = ".filecheck"
@@ -28,7 +32,42 @@ check_modified: int = 0
 check_same: int = 0
 
 _SUPPORTED_VERSIONS: tuple[str, ...] = ("0.1", "0.2")
-_SUPPORTED_SIGS: tuple[str, ...] = ("\u27f9", "ascii")
+_SUPPORTED_SIGS: tuple[str, ...] = ("\u27f9", "FLCK")
+_SPINNER_FRAMES: tuple[str, ...] = ("⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷")
+_spinner_cycle = itertools.cycle(_SPINNER_FRAMES)
+_terminal_width: int = 0
+
+
+def _get_width() -> int:
+    global _terminal_width
+    if _terminal_width == 0:
+        try:
+            _terminal_width = shutil.get_terminal_size().columns
+        except (AttributeError, OSError, ValueError):
+            _terminal_width = 80
+    return _terminal_width
+
+
+def _progress(path: str) -> None:
+    avail: int = _get_width() - 2
+    if avail < 1:
+        avail = 1
+    if len(path) > avail:
+        display: str = path[-(avail - 1):]
+    else:
+        display = path
+    try:
+        print(f"\r\033[K{next(_spinner_cycle)} {display}", end="", file=sys.stderr)
+    except (OSError, UnicodeEncodeError):
+        pass
+
+
+def _clear_progress() -> None:
+    width: int = _get_width()
+    try:
+        print("\r" + " " * width + "\r", end="", file=sys.stderr)
+    except (OSError, UnicodeEncodeError):
+        pass
 _ALGORITHMS: dict[str, Callable[[], Any]] = {
     "md5": hashlib.md5,
     "sha256": hashlib.sha256,
@@ -65,9 +104,22 @@ def _compute_hash(fileName: str, algorithm: str | None = None) -> str:
         algo = "md5"
     try:
         h = _ALGORITHMS[algo]()
+        try:
+            file_size: int = os.path.getsize(fileName)
+        except OSError:
+            file_size = 0
+        show_progress: bool = not options.quiet and not options.verbose and file_size > 1048576
+        bytes_read: int = 0
+        next_pct: int = 5
         with open(fileName, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
                 h.update(chunk)
+                if show_progress:
+                    bytes_read += len(chunk)
+                    new_pct: int = bytes_read * 100 // file_size
+                    if new_pct >= next_pct:
+                        _progress(f"{fileName} ({new_pct}%)")
+                        next_pct = ((new_pct // 5) + 1) * 5
         return h.hexdigest()
     except (OSError, PermissionError, FileNotFoundError) as e:
         print(f"Error calculating {algo} for {fileName}: {e}")
@@ -83,6 +135,7 @@ def _compute_hash_batch(files_dict: dict[str, dict[str, Any]]) -> None:
             keys.append(key)
     if not paths:
         return
+    key_to_path: dict[str, str] = dict(zip(keys, paths))
     with ThreadPoolExecutor(max_workers=4) as executor:
         fut_to_key = {executor.submit(_compute_hash, p): k for p, k in zip(paths, keys)}
         for fut in as_completed(fut_to_key):
@@ -91,6 +144,8 @@ def _compute_hash_batch(files_dict: dict[str, dict[str, Any]]) -> None:
                 files_dict[key]["hash"] = fut.result()
             except Exception:
                 files_dict[key]["hash"] = "error"
+            if not options.quiet and not options.verbose:
+                _progress(key_to_path[key])
 
 
 def shouldIgnore(filename: str) -> bool:
@@ -125,13 +180,19 @@ def walkTree(
     data: Any,
     beginDirCallback: Callable[[str], Any] | bool = False,
     endDirCallback: Callable[[str, Any], None] | bool = False,
+    bfs: bool = False,
 ) -> None:
     top_path: Path = Path(top)
-    stack: list[tuple[Path, Any]] = [(top_path, data)]
-    while stack:
+    if bfs:
+        container: deque = deque([(top_path, data)])
+        pop = container.popleft
+    else:
+        container = [(top_path, data)]
+        pop = container.pop
+    while container:
         dirPath: Path
         inheritedData: Any
-        dirPath, inheritedData = stack.pop()
+        dirPath, inheritedData = pop()
         if callable(beginDirCallback):
             dirData: Any = beginDirCallback(str(dirPath))
         else:
@@ -146,6 +207,7 @@ def walkTree(
                     st: os.stat_result = entry.lstat()
                     mode: int = st.st_mode
                 except (OSError, PermissionError) as e:
+                    _clear_progress()
                     print(f"cannot stat {entry}: {e}")
                     continue
 
@@ -155,10 +217,11 @@ def walkTree(
                 if stat.S_ISDIR(mode):
                     callback(str(entry), dirData)
                     if recursive:
-                        stack.append((entry, dirData))
+                        container.append((entry, dirData))
                 elif stat.S_ISREG(mode):
                     callback(str(entry), dirData)
                 else:
+                    _clear_progress()
                     print(f'Skipping {entry}')
         if callable(endDirCallback):
             endDirCallback(str(dirPath), dirData)
@@ -234,6 +297,8 @@ def filecheckLoad(dirName: str) -> dict[str, Any] | bool:
 def checkBegin(dirName: str) -> dict[str, Any]:
     if options.verbose:
         print(dirName)
+    elif not options.quiet:
+        _progress(dirName)
     return generateBegin(dirName)
 
 
@@ -244,7 +309,10 @@ def checkFile(fileName: str, data: dict[str, Any]) -> None:
 def compareData(current: dict[str, Any], saved: dict[str, Any], dirName: str) -> None:
     global check_exit_code, check_added, check_deleted, check_modified, check_same
     showSameFile: bool = options.show_same_files
-    for key, currentValue in current["files"].items():
+    total: int = len(current["files"])
+    for idx, (key, currentValue) in enumerate(current["files"].items()):
+        if not options.quiet and not options.verbose:
+            _progress(f"{dirName} [{idx+1}/{total}] {key}")
         status: str = "pending"
         if key not in saved["files"]:
             status = "new item"
@@ -278,7 +346,11 @@ def compareData(current: dict[str, Any], saved: dict[str, Any], dirName: str) ->
                     status = "same file"
             del saved["files"][key]
         if showSameFile or status != "same file":
+            if not options.quiet and not options.verbose:
+                _clear_progress()
             print(f"{status}: {os.path.join(dirName, key)}")
+            if not options.quiet and not options.verbose:
+                _progress(f"{dirName} [{idx+1}/{total}] {key}")
         if status in ("same file", "pending"):
             check_same += 1
         else:
@@ -286,12 +358,18 @@ def compareData(current: dict[str, Any], saved: dict[str, Any], dirName: str) ->
             check_exit_code += 1
     for key, savedValue in saved["files"].items():
         if not shouldIgnore(key):
+            if not options.quiet and not options.verbose:
+                _clear_progress()
             print(f"deleted file: {os.path.join(dirName, key)}")
+            if not options.quiet and not options.verbose:
+                _progress(f"{dirName} [deleted] {key}")
             check_exit_code += 1
             check_deleted += 1
 
 
 def checkEnd(dirName: str, data: dict[str, Any]) -> None:
+    if not options.quiet and not options.verbose:
+        _clear_progress()
     savedData: dict[str, Any] | bool = filecheckLoad(dirName)
     compareData(data, savedData, dirName)
 
@@ -299,6 +377,8 @@ def checkEnd(dirName: str, data: dict[str, Any]) -> None:
 def generateBegin(dirName: str) -> dict[str, Any]:
     if options.verbose:
         print(dirName)
+    elif not options.quiet:
+        _progress(dirName)
     return filecheckNew(dirName)
 
 
@@ -316,6 +396,8 @@ def generateFile(fileName: str, data: dict[str, Any]) -> None:
 
 
 def _generateFile(fileName: str, data: dict[str, Any], hashFunc: Callable[[str], str] | bool) -> None:
+    if not options.quiet and not options.verbose:
+        _progress(fileName)
     try:
         if not shouldIgnore(fileName):
             filecheckSet(data, makeInfo(fileName, hashFunc))
@@ -350,6 +432,8 @@ def makeInfo(fileName: str, hashFunc: Callable[[str], str] | bool = False) -> di
 def updateBegin(dirName: str) -> dict[str, Any]:
     if options.verbose:
         print(dirName)
+    elif not options.quiet:
+        _progress(dirName)
     updateData: dict[str, Any] = {}
     updateData["old"] = filecheckLoad(dirName)
     updateData["new"] = filecheckNew(dirName)
@@ -357,6 +441,8 @@ def updateBegin(dirName: str) -> dict[str, Any]:
 
 
 def updateFile(fileName: str, data: dict[str, Any]) -> None:
+    if not options.quiet and not options.verbose:
+        _progress(fileName)
     generateFileWithoutHash(fileName, data["new"])
     baseName: str = Path(fileName).name
     newInfo: dict[str, Any] = data["new"]["files"][baseName]
@@ -365,20 +451,24 @@ def updateFile(fileName: str, data: dict[str, Any]) -> None:
         oldInfo: dict[str, Any] = data["old"]["files"][baseName]
         changed: bool = False
         if not options.ignore_size and newInfo["size"] != oldInfo["size"]:
+            _clear_progress()
             print("reason: size")
             changed = True
         elif options.check_ctime and int(newInfo["ctime"]) != int(oldInfo["ctime"]):
+            _clear_progress()
             print("reason: ctime")
             changed = True
         elif options.check_atime and int(newInfo["atime"]) != int(oldInfo["atime"]):
             changed = True
         elif not options.ignore_mtime and int(newInfo["mtime"]) != int(oldInfo["mtime"]):
+            _clear_progress()
             print("reason: mtime")
             changed = True
     else:
         changed = True
 
     if changed:
+        _clear_progress()
         print(f"Regenerating {fileName}.")
         generateFile(fileName, data["new"])
     else:
@@ -393,11 +483,15 @@ def updateEnd(dirName: str, data: dict[str, Any]) -> None:
 def generate(directory: str) -> None:
     print(f"GENERATE: {directory}")
     walkTree(directory, generateFileWithoutHash, options.recursive, options.follow_links, {}, generateBegin, generateEnd)
+    if not options.quiet and not options.verbose:
+        _clear_progress()
 
 
 def update(directory: str) -> None:
     print(f"UPDATE: {directory}")
     walkTree(directory, updateFile, options.recursive, options.follow_links, {}, updateBegin, updateEnd)
+    if not options.quiet and not options.verbose:
+        _clear_progress()
 
 
 def check(directory: str) -> int:
@@ -408,8 +502,9 @@ def check(directory: str) -> int:
     check_modified = 0
     check_same = 0
     print(f"CHECK: {directory}")
-    walkTree(directory, checkFile, options.recursive, options.follow_links, {}, checkBegin, checkEnd)
+    walkTree(directory, checkFile, options.recursive, options.follow_links, {}, checkBegin, checkEnd, bfs=True)
     if not options.quiet:
+        _clear_progress()
         total: int = check_added + check_deleted + check_modified + check_same
         print(f"Total: {total}  Added: {check_added}  Deleted: {check_deleted}  Modified: {check_modified}  Same: {check_same}")
     return check_exit_code
@@ -469,6 +564,7 @@ def main(argv: list[str] | None = None) -> None:
             if isinstance(ret, int):
                 sys.exit(ret)
         except KeyboardInterrupt:
+            _clear_progress()
             print("\nOperation cancelled by user")
             sys.exit(1)
         except Exception as e:
