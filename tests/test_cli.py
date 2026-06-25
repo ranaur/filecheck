@@ -3,6 +3,7 @@ import filecheck
 import sys
 import os
 import io
+from pathlib import Path
 
 
 class TestCLI:
@@ -143,3 +144,44 @@ class TestCLI:
         loaded = filecheck.filecheckLoad(str(tmp_path))
         assert "regular.txt" in loaded["files"]
         assert "_IconShouldBeIgnored" in loaded["files"]
+
+    def test_quiet_flag_suppresses_summary(self, tmp_path):
+        (tmp_path / "f.txt").write_text("data")
+        self.run_main(["generate", "."], tmp_path)
+        ret, out = self.run_main(["check", "-q", "."], tmp_path)
+        assert ret == 0
+        assert "Total:" not in out
+
+    def test_quiet_flag_still_shows_file_lines(self, tmp_path):
+        (tmp_path / "f.txt").write_text("data")
+        self.run_main(["generate", "."], tmp_path)
+        (tmp_path / "f.txt").write_text("DATA")
+        ret, out = self.run_main(["check", "-q", "."], tmp_path)
+        assert ret != 0
+        assert "mismatch" in out
+
+    def test_algorithm_flag_sha256(self, tmp_path):
+        (tmp_path / "f.txt").write_text("data")
+        ret, out = self.run_main(["generate", "-A", "sha256", "."], tmp_path)
+        assert ret == 0
+        loaded = filecheck.filecheckLoad(str(tmp_path))
+        assert loaded["algorithm"] == "sha256"
+
+    def test_algorithm_flag_default_md5(self, tmp_path):
+        (tmp_path / "f.txt").write_text("data")
+        ret, out = self.run_main(["generate", "."], tmp_path)
+        assert ret == 0
+        loaded = filecheck.filecheckLoad(str(tmp_path))
+        assert loaded["algorithm"] == "md5"
+
+    def test_main_guard(self, tmp_path):
+        """Trigger __name__ == '__main__' guard via runpy."""
+        import runpy, sys
+        old_argv = sys.argv
+        sys.argv = [filecheck.__file__, "--help"]
+        try:
+            with pytest.raises(SystemExit) as exc:
+                runpy.run_path(filecheck.__file__, run_name="__main__")
+            assert exc.value.code == 0
+        finally:
+            sys.argv = old_argv
