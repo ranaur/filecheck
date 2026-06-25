@@ -316,7 +316,6 @@ def compareData(current: dict[str, Any], saved: dict[str, Any], dirName: str) ->
         status: str = "pending"
         if key not in saved["files"]:
             status = "new item"
-            check_added += 1
         else:
             savedValue: dict[str, Any] = saved["files"][key]
             if currentValue["hash"] == "<DIR>" or savedValue["hash"] == "<DIR>":
@@ -353,6 +352,8 @@ def compareData(current: dict[str, Any], saved: dict[str, Any], dirName: str) ->
                 _progress(f"{dirName} [{idx+1}/{total}] {key}")
         if status in ("same file", "pending"):
             check_same += 1
+        elif status in ("new item"):
+            check_added += 1
         else:
             check_modified += 1
             check_exit_code += 1
