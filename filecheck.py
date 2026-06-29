@@ -89,6 +89,7 @@ class Options:
     algorithm: str = "md5"
     exclude: list[str] = field(default_factory=list)
     include: list[str] = field(default_factory=list)
+    _skip_new_dirs: bool = False
 
 
 options: Options = Options()
@@ -174,7 +175,7 @@ def shouldIgnore(filename: str) -> bool:
 
 def walkTree(
     top: str,
-    callback: Callable[[str, Any], None],
+    callback: Callable[[str, Any], bool | None],
     recursive: bool,
     followLink: bool,
     data: Any,
@@ -215,8 +216,8 @@ def walkTree(
                     continue
 
                 if stat.S_ISDIR(mode):
-                    callback(str(entry), dirData)
-                    if recursive:
+                    ret = callback(str(entry), dirData)
+                    if recursive and ret is not False:
                         container.append((entry, dirData))
                 elif stat.S_ISREG(mode):
                     callback(str(entry), dirData)
@@ -299,17 +300,40 @@ def checkBegin(dirName: str) -> dict[str, Any]:
         print(dirName)
     elif not options.quiet:
         _progress(dirName)
-    return generateBegin(dirName)
+    data: dict[str, Any] = generateBegin(dirName)
+    saved: dict[str, Any] | bool = filecheckLoad(dirName)
+    data["_saved_keys"] = set(saved["files"].keys()) if saved is not False else set()
+    return data
 
 
-def checkFile(fileName: str, data: dict[str, Any]) -> None:
+def checkFile(fileName: str, data: dict[str, Any]) -> bool | None:
     generateFileWithoutHash(fileName, data)
+    try:
+        if options._skip_new_dirs and Path(fileName).is_dir():
+            key: str = Path(fileName).name
+            if key not in data.get("_saved_keys", set()):
+                return False
+    except OSError:
+        pass
 
 
-def compareData(current: dict[str, Any], saved: dict[str, Any], dirName: str) -> None:
+def _metadata_changed(currentValue: dict[str, Any], savedValue: dict[str, Any]) -> bool:
+    if not options.ignore_size and savedValue["size"] != currentValue["size"]:
+        return True
+    if not options.ignore_mtime and int(savedValue["mtime"]) != int(currentValue["mtime"]):
+        return True
+    if options.check_atime and int(savedValue["atime"]) != int(currentValue["atime"]):
+        return True
+    if options.check_ctime and int(savedValue["ctime"]) != int(currentValue["ctime"]):
+        return True
+    return False
+
+
+def compareData(current: dict[str, Any], saved: dict[str, Any], dirName: str) -> list[dict[str, Any]]:
     global check_exit_code, check_added, check_deleted, check_modified, check_same
     showSameFile: bool = options.show_same_files
     total: int = len(current["files"])
+    changes: list[dict[str, Any]] = []
     for idx, (key, currentValue) in enumerate(current["files"].items()):
         if not options.quiet and not options.verbose:
             _progress(f"{dirName} [{idx+1}/{total}] {key}")
@@ -323,14 +347,15 @@ def compareData(current: dict[str, Any], saved: dict[str, Any], dirName: str) ->
                     status = "directory mismatch"
                 else:
                     status = "same file"
-            elif not options.ignore_size and savedValue["size"] != currentValue["size"]:
-                status = "size mismatch"
-            elif not options.ignore_mtime and int(savedValue["mtime"]) != int(currentValue["mtime"]):
-                status = "mtime mismatch"
-            elif options.check_atime and int(savedValue["atime"]) != int(currentValue["atime"]):
-                status = "atime mismatch"
-            elif options.check_ctime and int(savedValue["ctime"]) != int(currentValue["ctime"]):
-                status = "ctime mismatch"
+            elif _metadata_changed(currentValue, savedValue):
+                if not options.ignore_size and savedValue["size"] != currentValue["size"]:
+                    status = "size mismatch"
+                elif not options.ignore_mtime and int(savedValue["mtime"]) != int(currentValue["mtime"]):
+                    status = "mtime mismatch"
+                elif options.check_atime and int(savedValue["atime"]) != int(currentValue["atime"]):
+                    status = "atime mismatch"
+                elif options.check_ctime and int(savedValue["ctime"]) != int(currentValue["ctime"]):
+                    status = "ctime mismatch"
             else:
                 if not options.ignore_hash and currentValue["hash"] == "" and savedValue["hash"] != "":
                     saved_algo: str = saved.get("algorithm", "md5")
@@ -344,6 +369,7 @@ def compareData(current: dict[str, Any], saved: dict[str, Any], dirName: str) ->
                 else:
                     status = "same file"
             del saved["files"][key]
+        changes.append({"status": status, "key": key, "dirName": dirName})
         if showSameFile or status != "same file":
             if not options.quiet and not options.verbose:
                 _clear_progress()
@@ -354,6 +380,7 @@ def compareData(current: dict[str, Any], saved: dict[str, Any], dirName: str) ->
             check_same += 1
         elif status in ("new item"):
             check_added += 1
+            check_exit_code += 1
         else:
             check_modified += 1
             check_exit_code += 1
@@ -364,15 +391,45 @@ def compareData(current: dict[str, Any], saved: dict[str, Any], dirName: str) ->
             print(f"deleted file: {os.path.join(dirName, key)}")
             if not options.quiet and not options.verbose:
                 _progress(f"{dirName} [deleted] {key}")
+            changes.append({"status": "deleted file", "key": key, "dirName": dirName})
             check_exit_code += 1
             check_deleted += 1
+    return changes
 
 
 def checkEnd(dirName: str, data: dict[str, Any]) -> None:
     if not options.quiet and not options.verbose:
         _clear_progress()
     savedData: dict[str, Any] | bool = filecheckLoad(dirName)
+    if savedData is False:
+        error(f"invalid or corrupt manifest in {dirName}")
+        return
     compareData(data, savedData, dirName)
+
+
+def analyzeEnd(dirName: str, data: dict[str, Any]) -> None:
+    if not options.quiet and not options.verbose:
+        _clear_progress()
+    savedData: dict[str, Any] | bool = filecheckLoad(dirName)
+    if savedData is False:
+        savedData = filecheckNew(dirName)
+    new_data: dict[str, Any] = filecheckNew(dirName)
+    for key, currentValue in data["files"].items():
+        if currentValue["hash"] == "<DIR>":
+            new_data["files"][key] = currentValue
+        elif key in savedData["files"]:
+            savedValue = savedData["files"][key]
+            if not _metadata_changed(currentValue, savedValue):
+                new_data["files"][key] = savedValue
+            else:
+                currentValue["hash"] = ""
+                new_data["files"][key] = currentValue
+            del savedData["files"][key]
+        else:
+            currentValue["hash"] = ""
+            new_data["files"][key] = currentValue
+    _compute_hash_batch(new_data["files"])
+    filecheckSave(new_data, dirName)
 
 
 def generateBegin(dirName: str) -> dict[str, Any]:
@@ -430,67 +487,9 @@ def makeInfo(fileName: str, hashFunc: Callable[[str], str] | bool = False) -> di
         return None
 
 
-def updateBegin(dirName: str) -> dict[str, Any]:
-    if options.verbose:
-        print(dirName)
-    elif not options.quiet:
-        _progress(dirName)
-    updateData: dict[str, Any] = {}
-    updateData["old"] = filecheckLoad(dirName)
-    updateData["new"] = filecheckNew(dirName)
-    return updateData
-
-
-def updateFile(fileName: str, data: dict[str, Any]) -> None:
-    if not options.quiet and not options.verbose:
-        _progress(fileName)
-    generateFileWithoutHash(fileName, data["new"])
-    baseName: str = Path(fileName).name
-    newInfo: dict[str, Any] = data["new"]["files"][baseName]
-
-    if baseName in data["old"]["files"]:
-        oldInfo: dict[str, Any] = data["old"]["files"][baseName]
-        changed: bool = False
-        if not options.ignore_size and newInfo["size"] != oldInfo["size"]:
-            _clear_progress()
-            print("reason: size")
-            changed = True
-        elif options.check_ctime and int(newInfo["ctime"]) != int(oldInfo["ctime"]):
-            _clear_progress()
-            print("reason: ctime")
-            changed = True
-        elif options.check_atime and int(newInfo["atime"]) != int(oldInfo["atime"]):
-            changed = True
-        elif not options.ignore_mtime and int(newInfo["mtime"]) != int(oldInfo["mtime"]):
-            _clear_progress()
-            print("reason: mtime")
-            changed = True
-    else:
-        changed = True
-
-    if changed:
-        _clear_progress()
-        print(f"Regenerating {fileName}.")
-        generateFile(fileName, data["new"])
-    else:
-        data["new"]["files"][baseName]["hash"] = oldInfo["hash"]
-
-
-def updateEnd(dirName: str, data: dict[str, Any]) -> None:
-    _compute_hash_batch(data["new"]["files"])
-    filecheckSave(data["new"], dirName)
-
-
-def generate(directory: str) -> None:
-    print(f"GENERATE: {directory}")
-    walkTree(directory, generateFileWithoutHash, options.recursive, options.follow_links, {}, generateBegin, generateEnd)
-    if not options.quiet and not options.verbose:
-        _clear_progress()
-
-
-def update(directory: str) -> None:
-    print(f"UPDATE: {directory}")
-    walkTree(directory, updateFile, options.recursive, options.follow_links, {}, updateBegin, updateEnd)
+def analyze(directory: str) -> None:
+    print(f"ANALYZE: {directory}")
+    walkTree(directory, checkFile, options.recursive, options.follow_links, {}, checkBegin, analyzeEnd, bfs=True)
     if not options.quiet and not options.verbose:
         _clear_progress()
 
@@ -503,7 +502,12 @@ def check(directory: str) -> int:
     check_modified = 0
     check_same = 0
     print(f"CHECK: {directory}")
-    walkTree(directory, checkFile, options.recursive, options.follow_links, {}, checkBegin, checkEnd, bfs=True)
+    old_skip: bool = options._skip_new_dirs
+    options._skip_new_dirs = True
+    try:
+        walkTree(directory, checkFile, options.recursive, options.follow_links, {}, checkBegin, checkEnd, bfs=True)
+    finally:
+        options._skip_new_dirs = old_skip
     if not options.quiet:
         _clear_progress()
         total: int = check_added + check_deleted + check_modified + check_same
@@ -529,22 +533,22 @@ def _build_shared_parent() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser: argparse.ArgumentParser = argparse.ArgumentParser(description='Check file integrity')
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(description='File integrity checker – create, update, and verify file manifests using MD5/SHA256 hashes')
     parser.add_argument('-v', '--verbose', action='store_true', help='display more info')
     subparsers = parser.add_subparsers(dest="command", help='command to execute')
 
     shared: argparse.ArgumentParser = _build_shared_parent()
 
-    parser_generate = subparsers.add_parser('generate', parents=[shared], help='generate integrity files',
-                                            conflict_handler='resolve')
-    parser_generate.add_argument('directory', nargs='?', default=".", help='directory to generate (defaults to current dir)')
+    parser_analyze = subparsers.add_parser('analyze', parents=[shared], help='scan directory, add new files, update changed files, remove deleted files (default: md5)',
+                                           conflict_handler='resolve', description='Scan the directory tree and build or update the .filecheck manifest. '
+                                           'New files are added with their hash, changed files are re-hashed, '
+                                           'and files that no longer exist are removed from the manifest. '
+                                           'When no manifest exists, all files are treated as new.')
+    parser_analyze.add_argument('directory', nargs='?', default=".", help='directory to scan (defaults to current dir)')
 
-    parser_update = subparsers.add_parser('update', parents=[shared], help='update integrity files',
-                                          conflict_handler='resolve')
-    parser_update.add_argument('directory', nargs='?', default=".", help='directory to update (defaults to current dir)')
-
-    parser_check = subparsers.add_parser('check', parents=[shared], help='check integrity of files',
-                                         conflict_handler='resolve')
+    parser_check = subparsers.add_parser('check', parents=[shared], help='verify files against the existing manifest and report mismatches',
+                                         conflict_handler='resolve', description='Compare the current directory state against the .filecheck manifest '
+                                         'and report added, deleted, or changed files.')
     parser_check.add_argument('directory', nargs='?', default=".", help='directory to check (defaults to current dir)')
     parser_check.add_argument('-s', '--show-same-files', action='store_true', help='show files that are the same')
     parser_check.add_argument('-H', '--ignore-hash', action='store_true', help='ignore hash (contents)')

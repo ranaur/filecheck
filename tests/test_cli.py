@@ -34,51 +34,50 @@ class TestCLI:
         ret, out = self.run_main([])
         assert "usage:" in out.lower()
 
-    def test_generate(self, tmp_path):
+    def test_analyze(self, tmp_path):
         f = tmp_path / "f.txt"
         f.write_text("data")
-        ret, out = self.run_main(["generate", "."], tmp_path)
+        ret, out = self.run_main(["analyze", "."], tmp_path)
         assert ret == 0
-        assert "GENERATE:" in out
+        assert "ANALYZE:" in out
         assert (tmp_path / ".filecheck").is_file()
 
-    def test_update(self, tmp_path):
+    def test_analyze_twice(self, tmp_path):
         (tmp_path / "f.txt").write_text("data")
-        self.run_main(["generate", "."], tmp_path)
+        self.run_main(["analyze", "."], tmp_path)
         (tmp_path / "f.txt").write_text("modified")
-        ret, out = self.run_main(["update", "."], tmp_path)
+        ret, out = self.run_main(["analyze", "."], tmp_path)
         assert ret == 0
-        assert "UPDATE:" in out
+        assert "ANALYZE:" in out
 
     def test_check(self, tmp_path):
         (tmp_path / "f.txt").write_text("data")
-        self.run_main(["generate", "."], tmp_path)
+        self.run_main(["analyze", "."], tmp_path)
         ret, out = self.run_main(["check", "."], tmp_path)
         assert ret == 0
         assert "CHECK:" in out
 
-    def test_generate_recursive_flag(self, tmp_path):
+    def test_analyze_recursive_flag(self, tmp_path):
         sub = tmp_path / "sub"
         sub.mkdir()
         (sub / "nested.txt").write_text("nested")
         (tmp_path / "f.txt").write_text("data")
-        ret, out = self.run_main(["generate", "-r", "."], tmp_path)
+        ret, out = self.run_main(["analyze", "-r", "."], tmp_path)
         assert ret == 0
         loaded = filecheck.filecheckLoad(str(tmp_path))
         assert "sub" in loaded["files"]
         sub_loaded = filecheck.filecheckLoad(str(tmp_path / "sub"))
         assert "nested.txt" in sub_loaded["files"]
 
-    def test_generate_verbose_flag(self, tmp_path):
+    def test_analyze_verbose_flag(self, tmp_path):
         (tmp_path / "f.txt").write_text("data")
-        ret, out = self.run_main(["-v", "generate", "."], tmp_path)
+        ret, out = self.run_main(["-v", "analyze", "."], tmp_path)
         assert ret == 0
-        # With verbose, the directory name is printed during walk
-        assert "GENERATE:" in out
+        assert "ANALYZE:" in out
 
     def test_check_all_flags(self, tmp_path):
         (tmp_path / "f.txt").write_text("data")
-        self.run_main(["generate", "."], tmp_path)
+        self.run_main(["analyze", "."], tmp_path)
         ret, out = self.run_main(
             ["check", "-r", "-s", "-a", "-c", "-M", "-S", "-H", "."],
             tmp_path
@@ -86,42 +85,32 @@ class TestCLI:
         assert ret == 0
 
     def test_keyboard_interrupt(self, tmp_path, monkeypatch):
-        def mock_generate(*_):
+        def mock_analyze(*_):
             raise KeyboardInterrupt()
-        monkeypatch.setattr(filecheck, 'generate', mock_generate)
-        ret, out = self.run_main(["generate", "."], tmp_path)
+        monkeypatch.setattr(filecheck, 'analyze', mock_analyze)
+        ret, out = self.run_main(["analyze", "."], tmp_path)
         assert ret == 1
         assert "cancelled" in out
 
     def test_general_exception(self, tmp_path, monkeypatch):
-        def mock_generate(*_):
+        def mock_analyze(*_):
             raise RuntimeError("unexpected error")
-        monkeypatch.setattr(filecheck, 'generate', mock_generate)
-        ret, out = self.run_main(["generate", "."], tmp_path)
+        monkeypatch.setattr(filecheck, 'analyze', mock_analyze)
+        ret, out = self.run_main(["analyze", "."], tmp_path)
         assert ret == 1
         assert "ERROR: Error: unexpected error" in out
 
     def test_general_exception_verbose(self, tmp_path, monkeypatch):
-        def mock_generate(*_):
+        def mock_analyze(*_):
             raise RuntimeError("unexpected error")
-        monkeypatch.setattr(filecheck, 'generate', mock_generate)
-        ret, out = self.run_main(["-v", "generate", "."], tmp_path)
+        monkeypatch.setattr(filecheck, 'analyze', mock_analyze)
+        ret, out = self.run_main(["-v", "analyze", "."], tmp_path)
         assert ret == 1
         assert "Traceback" in out
 
-    def test_update_with_all_flags(self, tmp_path):
-        (tmp_path / "f.txt").write_text("data")
-        self.run_main(["generate", "."], tmp_path)
-        ret, out = self.run_main(
-            ["update", "-a", "-c", "-M", "-S", "."],
-            tmp_path
-        )
-        assert ret == 0
-        assert "UPDATE:" in out
-
     def test_check_exit_code_nonzero_on_mismatch(self, tmp_path):
         (tmp_path / "f.txt").write_text("data")
-        self.run_main(["generate", "."], tmp_path)
+        self.run_main(["analyze", "."], tmp_path)
         (tmp_path / "f.txt").write_text("modified")
         ret, out = self.run_main(["check", "."], tmp_path)
         assert ret != 0
@@ -129,7 +118,7 @@ class TestCLI:
     def test_exclude_flag_via_cli(self, tmp_path):
         (tmp_path / "keep.txt").write_text("keep")
         (tmp_path / "ignore.log").write_text("ignore")
-        ret, out = self.run_main(["generate", "--exclude", "*.log", "."], tmp_path)
+        ret, out = self.run_main(["analyze", "--exclude", "*.log", "."], tmp_path)
         assert ret == 0
         loaded = filecheck.filecheckLoad(str(tmp_path))
         assert "keep.txt" in loaded["files"]
@@ -139,7 +128,7 @@ class TestCLI:
         """--include pattern overrides ignore list so normally-ignored files are tracked."""
         (tmp_path / "_IconShouldBeIgnored").write_text("normally ignored")
         (tmp_path / "regular.txt").write_text("normal")
-        ret, out = self.run_main(["generate", "--include", "Icon*", "."], tmp_path)
+        ret, out = self.run_main(["analyze", "--include", "Icon*", "."], tmp_path)
         assert ret == 0
         loaded = filecheck.filecheckLoad(str(tmp_path))
         assert "regular.txt" in loaded["files"]
@@ -147,14 +136,14 @@ class TestCLI:
 
     def test_quiet_flag_suppresses_summary(self, tmp_path):
         (tmp_path / "f.txt").write_text("data")
-        self.run_main(["generate", "."], tmp_path)
+        self.run_main(["analyze", "."], tmp_path)
         ret, out = self.run_main(["check", "-q", "."], tmp_path)
         assert ret == 0
         assert "Total:" not in out
 
     def test_quiet_flag_still_shows_file_lines(self, tmp_path):
         (tmp_path / "f.txt").write_text("data")
-        self.run_main(["generate", "."], tmp_path)
+        self.run_main(["analyze", "."], tmp_path)
         (tmp_path / "f.txt").write_text("DATA")
         ret, out = self.run_main(["check", "-q", "."], tmp_path)
         assert ret != 0
@@ -162,14 +151,14 @@ class TestCLI:
 
     def test_algorithm_flag_sha256(self, tmp_path):
         (tmp_path / "f.txt").write_text("data")
-        ret, out = self.run_main(["generate", "-A", "sha256", "."], tmp_path)
+        ret, out = self.run_main(["analyze", "-A", "sha256", "."], tmp_path)
         assert ret == 0
         loaded = filecheck.filecheckLoad(str(tmp_path))
         assert loaded["algorithm"] == "sha256"
 
     def test_algorithm_flag_default_md5(self, tmp_path):
         (tmp_path / "f.txt").write_text("data")
-        ret, out = self.run_main(["generate", "."], tmp_path)
+        ret, out = self.run_main(["analyze", "."], tmp_path)
         assert ret == 0
         loaded = filecheck.filecheckLoad(str(tmp_path))
         assert loaded["algorithm"] == "md5"

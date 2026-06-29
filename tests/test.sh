@@ -40,7 +40,7 @@ rm -rf test
 mkdir test
 
 	# empty dir
-fc generate test
+fc analyze test
 fc check test
 
 #assertFileMD5 test/.filecheck edb8fe59d0410d8a2f51af16d4ed551e when used \r\r\n to separate lines
@@ -49,7 +49,7 @@ assertFileMD5 test/.filecheck b602183573352abf933bc7ca85fd0629
 echo "One" > test/One
 
 	# one file
-fc generate test 
+fc analyze test 
 fc check test
 
 assertFilecheckMD5 test/One
@@ -58,17 +58,17 @@ assertFilecheckMD5 test/One
 mkdir test/sub
 echo "Sub" > test/sub/Two
 
-fc generate test
+fc analyze test
 fc check test
 
-fc generate -r test
+fc analyze -r test
 fc check -r test
 
 touch test/sub/Two
 touch test/sub/Three
 
 fc check -r test
-fc update -r test
+fc analyze -r test
 
 #assertMD5 test/sub/.filecheck
 

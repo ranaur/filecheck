@@ -2,7 +2,7 @@ import pytest
 import filecheck
 import os
 from tests.conftest import make_info, make_manifest, create_file
-from pathlib import Path
+from pathlib import Path as Path
 
 
 # ── checkBegin() ──────────────────────────────────────────────────────
@@ -30,6 +30,42 @@ class TestCheckFile:
         filecheck.checkFile(str(f), data)
         assert "f.txt" in data["files"]
         assert data["files"]["f.txt"]["hash"] == ""
+
+    def test_skip_new_dir(self, tmp_path):
+        sub = tmp_path / "newsub"
+        sub.mkdir()
+        data = filecheck.checkBegin(str(tmp_path))
+        filecheck.options._skip_new_dirs = True
+        result = filecheck.checkFile(str(sub), data)
+        assert result is False
+
+    def test_skip_existing_dir(self, tmp_path):
+        sub = tmp_path / "existingsub"
+        sub.mkdir()
+        data = filecheck.checkBegin(str(tmp_path))
+        data["_saved_keys"].add("existingsub")
+        filecheck.options._skip_new_dirs = True
+        result = filecheck.checkFile(str(sub), data)
+        assert result is None
+
+    def test_skip_new_dir_disabled(self, tmp_path):
+        sub = tmp_path / "newsub"
+        sub.mkdir()
+        data = filecheck.checkBegin(str(tmp_path))
+        filecheck.options._skip_new_dirs = False
+        result = filecheck.checkFile(str(sub), data)
+        assert result is None
+
+    def test_skip_new_dir_oserror(self, tmp_path, monkeypatch):
+        sub = tmp_path / "somepath"
+        sub.mkdir()
+        def mock_is_dir(*_):
+            raise OSError("mock stat error")
+        monkeypatch.setattr(Path, "is_dir", mock_is_dir)
+        data = filecheck.checkBegin(str(tmp_path))
+        filecheck.options._skip_new_dirs = True
+        result = filecheck.checkFile(str(sub), data)
+        assert result is None
 
 
 # ── compareData() ─────────────────────────────────────────────────────
@@ -350,15 +386,16 @@ class TestCheckEnd:
         captured = capsys.readouterr()
         assert "f.txt" in captured.out
 
-    def test_invalid_manifest(self, tmp_path, monkeypatch):
-        """When filecheckLoad returns False, compareData receives False -> TypeError."""
+    def test_invalid_manifest(self, tmp_path, monkeypatch, capsys):
+        """When filecheckLoad returns False, checkEnd prints error and returns."""
         def mock_load(*_):
             return False
         monkeypatch.setattr(filecheck, 'filecheckLoad', mock_load)
         data = filecheck.filecheckNew(str(tmp_path))
         data["files"]["f.txt"] = make_info("f.txt", dir_name=str(tmp_path))
-        with pytest.raises(TypeError):
-            filecheck.checkEnd(str(tmp_path), data)
+        filecheck.checkEnd(str(tmp_path), data)
+        captured = capsys.readouterr()
+        assert "invalid or corrupt manifest" in captured.out
 
 
 class TestSummaryCounters:
@@ -411,7 +448,7 @@ class TestSummaryCounters:
         filecheck.options.recursive = False
         filecheck.options.show_same_files = True
         filecheck.options.quiet = True
-        filecheck.generate(str(tmp_path))
+        filecheck.analyze(str(tmp_path))
         filecheck.check(str(tmp_path))
         captured = capsys.readouterr()
         assert "Total:" not in captured.out
@@ -422,7 +459,7 @@ class TestSummaryCounters:
         filecheck.options.recursive = False
         filecheck.options.show_same_files = True
         filecheck.options.quiet = False
-        filecheck.generate(str(tmp_path))
+        filecheck.analyze(str(tmp_path))
         filecheck.check(str(tmp_path))
         captured = capsys.readouterr()
         assert "Total:" in captured.out

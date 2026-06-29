@@ -35,8 +35,8 @@ def assert_file_content(path, expected_content):
         content = f.read()
     assert content == expected_content, "File "+str(path)+" content mismatch"
 
-def test_generate_basic():
-    """Test basic generate command"""
+def test_analyze_basic():
+    """Test basic analyze command"""
     test_dir = tempfile.mkdtemp()
     try:
         # Create test files
@@ -46,10 +46,10 @@ def test_generate_basic():
         with open(os.path.join(test_dir, 'subdir', 'file2.txt'), 'w') as f:
             f.write('content2')
 
-        # Run generate
-        stdout, stderr, rc = run_filecheck(test_dir, "generate .")
-        assert rc == 0, "Generate failed: "+ str(stderr)
-        assert 'GENERATE:' in str(stdout)
+        # Run analyze
+        stdout, stderr, rc = run_filecheck(test_dir, "analyze .")
+        assert rc == 0, "Analyze failed: "+ str(stderr)
+        assert 'ANALYZE:' in str(stdout)
 
         # Check .filecheck exists
         filecheck_path = os.path.join(test_dir, '.filecheck')
@@ -58,13 +58,10 @@ def test_generate_basic():
         # Verify content (basic check for header and entries)
         with open(filecheck_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-        #print(lines)
         assert len(lines) >= 3, "Expected at least header + 2 entries"
         assert lines[0].startswith('FILECHECK'), "Invalid header"
 
     finally:
-        #o, e, r = run_command("ls -la", test_dir)
-        #print(o)
         shutil.rmtree(test_dir)
 
 def test_check_no_changes():
@@ -75,8 +72,8 @@ def test_check_no_changes():
         with open(os.path.join(test_dir, 'file1.txt'), 'w') as f:
             f.write('content1')
 
-        # Generate manifest
-        run_filecheck(test_dir, "generate .")
+        # Create manifest
+        run_filecheck(test_dir, "analyze .")
 
         # Run check
         stdout, stderr, rc = run_filecheck(test_dir, "check .")
@@ -95,8 +92,8 @@ def test_check_file_modified():
         with open(file_path, 'w') as f:
             f.write('original')
 
-        # Generate manifest
-        run_filecheck(test_dir, "generate .")
+        # Create manifest
+        run_filecheck(test_dir, "analyze .")
 
         # Modify file
         with open(file_path, 'w') as f:
@@ -110,8 +107,8 @@ def test_check_file_modified():
     finally:
         shutil.rmtree(test_dir)
 
-def test_update():
-    """Test update command"""
+def test_analyze():
+    """Test analyze command"""
     test_dir = tempfile.mkdtemp()
     try:
         # Create test file
@@ -119,17 +116,17 @@ def test_update():
         with open(file_path, 'w') as f:
             f.write('original')
 
-        # Generate initial manifest
-        run_filecheck(test_dir, "generate .")
+        # Create initial manifest
+        run_filecheck(test_dir, "analyze .")
 
         # Modify file
         with open(file_path, 'w') as f:
             f.write('updated')
 
-        # Run update
-        stdout, stderr, rc = run_filecheck(test_dir, "update .")
-        assert rc == 0, "Update failed: " + str(stderr)
-        assert 'UPDATE:' in str(stdout)
+        # Run analyze again
+        stdout, stderr, rc = run_filecheck(test_dir, "analyze .")
+        assert rc == 0, "Analyze failed: " + str(stderr)
+        assert 'ANALYZE:' in str(stdout)
 
         # Verify .filecheck is updated (check if MD5 changed)
         filecheck_path = os.path.join(test_dir, '.filecheck')
@@ -159,9 +156,9 @@ def test_recursive():
         with open(os.path.join(test_dir, 'dir1', 'dir2', 'file3.txt'), 'w') as f:
             f.write('level2')
 
-        # Generate recursive
-        stdout, stderr, rc = run_filecheck(test_dir, "generate . -r")
-        assert rc == 0, "Recursive generate failed: "+ str(stderr)
+        # Analyze recursive
+        stdout, stderr, rc = run_filecheck(test_dir, "analyze . -r")
+        assert rc == 0, "Recursive analyze failed: "+ str(stderr)
 
         # Check .filecheck has multiple entries
         filecheck_path = os.path.join(test_dir, '.filecheck')
@@ -181,9 +178,9 @@ def test_recursive():
         shutil.rmtree(test_dir)
 
 if __name__ == '__main__':
-    test_generate_basic()
+    test_analyze_basic()
     test_check_no_changes()
     test_check_file_modified()
-    test_update()
+    test_analyze()
     test_recursive()
     print("All tests passed!")
