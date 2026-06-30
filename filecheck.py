@@ -68,11 +68,11 @@ def _clear_progress() -> None:
         print("\r" + " " * width + "\r", end="", file=sys.stderr)
     except (OSError, UnicodeEncodeError):
         pass
+
 _ALGORITHMS: dict[str, Callable[[], Any]] = {
     "md5": hashlib.md5,
     "sha256": hashlib.sha256,
 }
-
 
 @dataclass
 class Options:
@@ -440,17 +440,17 @@ def generateBegin(dirName: str) -> dict[str, Any]:
     return filecheckNew(dirName)
 
 
-def generateEnd(dirName: str, data: dict[str, Any]) -> None:
-    _compute_hash_batch(data["files"])
-    filecheckSave(data, dirName)
+
+
+
 
 
 def generateFileWithoutHash(fileName: str, data: dict[str, Any]) -> None:
     _generateFile(fileName, data, False)
 
 
-def generateFile(fileName: str, data: dict[str, Any]) -> None:
-    _generateFile(fileName, data, _compute_hash)
+
+
 
 
 def _generateFile(fileName: str, data: dict[str, Any], hashFunc: Callable[[str], str] | bool) -> None:
